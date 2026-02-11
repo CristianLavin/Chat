@@ -3,7 +3,7 @@ import axios from 'axios';
 import { X, User, Shield, Edit2, Save, Camera } from 'lucide-react';
 import { AuthContext } from '../context/AuthContext';
 
-export default function RoomDetailsModal({ room, onClose }) {
+export default function RoomDetailsModal({ room, onClose, onUpdated }) {
   const { user } = useContext(AuthContext);
   const [details, setDetails] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -49,12 +49,23 @@ export default function RoomDetailsModal({ room, onClose }) {
       }
 
       try {
-          await axios.put(`http://localhost:3000/api/rooms/${room.id}`, formData, {
+          const res = await axios.put(`http://localhost:3000/api/rooms/${room.id}`, formData, {
               headers: { 'Content-Type': 'multipart/form-data' }
           });
           
-          // Refresh details
+          // Refresh local details
           fetchDetails();
+          
+          // Notify parent with the new data
+          if (onUpdated) {
+              onUpdated({
+                  id: room.id,
+                  name: editName,
+                  description: editDesc,
+                  avatar: res.data.avatar || details.avatar
+              });
+          }
+          
           setIsEditing(false);
           setEditAvatar(null);
           setPreviewAvatar(null);

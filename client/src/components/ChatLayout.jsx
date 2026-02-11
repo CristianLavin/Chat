@@ -21,6 +21,16 @@ export default function ChatLayout() {
     const newSocket = io(SOCKET_URL);
     setSocket(newSocket);
 
+    newSocket.on('room_updated', (updatedRoom) => {
+        setRooms(prev => prev.map(r => r.id === updatedRoom.id ? { ...r, ...updatedRoom } : r));
+        setCurrentRoom(prev => {
+            if (prev?.id === updatedRoom.id) {
+                return { ...prev, ...updatedRoom };
+            }
+            return prev;
+        });
+    });
+
     return () => newSocket.close();
   }, []);
 
@@ -31,8 +41,11 @@ export default function ChatLayout() {
   }, [token]);
 
   const fetchRooms = async () => {
+    if (!token) return;
     try {
-      const res = await axios.get('http://localhost:3000/api/rooms');
+      const res = await axios.get('http://localhost:3000/api/rooms', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
       setRooms(res.data);
     } catch (error) {
       console.error("Error fetching rooms", error);
@@ -59,6 +72,22 @@ export default function ChatLayout() {
       }
   };
 
+  const handleRoomUpdated = (updatedRoom) => {
+      if (updatedRoom) {
+          // If we have the specific room data from the socket, update it directly
+          setRooms(prev => prev.map(r => r.id === updatedRoom.id ? { ...r, ...updatedRoom } : r));
+          setCurrentRoom(prev => {
+              if (prev?.id === updatedRoom.id) {
+                  return { ...prev, ...updatedRoom };
+              }
+              return prev;
+          });
+      } else {
+          // Fallback to fetching all rooms
+          fetchRooms();
+      }
+  };
+
   return (
     <div className="flex h-screen bg-gray-100">
       <Sidebar 
@@ -76,6 +105,7 @@ export default function ChatLayout() {
             room={currentRoom} 
             user={user} 
             onDeleteRoom={handleRoomDeleted}
+            onUpdateRoom={(data) => handleRoomUpdated(data)}
         />
       ) : (
         <div className="flex-1 flex items-center justify-center text-gray-500">

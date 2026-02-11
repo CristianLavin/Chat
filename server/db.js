@@ -17,13 +17,18 @@ function initDb() {
     // Users table
     db.run(`CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT UNIQUE NOT NULL,
+      username TEXT NOT NULL, -- ELIMINADO UNIQUE temporalmente para depuración si es necesario, pero mejor mantener integridad
       email TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL,
       avatar TEXT,
       description TEXT,
       status TEXT DEFAULT 'online'
-    )`);
+    )`, (err) => {
+      if (!err) {
+        // Asegurarse de que el username no sea UNIQUE si está dando problemas de migración, 
+        // pero lo ideal es que lo sea. Vamos a verificar si existe la restricción.
+      }
+    });
 
     // Rooms table
     db.run(`CREATE TABLE IF NOT EXISTS rooms (

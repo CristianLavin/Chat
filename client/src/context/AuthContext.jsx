@@ -3,15 +3,21 @@ import axios from 'axios';
 
 export const AuthContext = createContext();
 
+// Configure axios defaults immediately to avoid race conditions on first mount
+const tokenFromStorage = localStorage.getItem('token');
+if (tokenFromStorage) {
+  axios.defaults.headers.common['Authorization'] = `Bearer ${tokenFromStorage}`;
+}
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('token'));
+  const [token, setToken] = useState(tokenFromStorage);
   const [loading, setLoading] = useState(true);
 
-  // Axios interceptor to add token
+  // Axios configuration and interceptors
   useEffect(() => {
     // Response interceptor for handling 401/403
-    const interceptor = axios.interceptors.response.use(
+    const responseInterceptor = axios.interceptors.response.use(
       (response) => response,
       (error) => {
         if (error.response && (error.response.status === 401 || error.response.status === 403)) {
@@ -47,14 +53,16 @@ export const AuthProvider = ({ children }) => {
     }
 
     return () => {
-      axios.interceptors.response.eject(interceptor);
+      axios.interceptors.response.eject(responseInterceptor);
     };
   }, [token]);
 
   const login = async (email, password) => {
     try {
       const res = await axios.post('http://localhost:3000/api/login', { email, password });
-      setToken(res.data.token);
+      const newToken = res.data.token;
+      axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+      setToken(newToken);
       setUser(res.data.user);
       return { success: true };
     } catch (error) {
@@ -65,7 +73,9 @@ export const AuthProvider = ({ children }) => {
   const register = async (username, email, password) => {
     try {
       const res = await axios.post('http://localhost:3000/api/register', { username, email, password });
-      setToken(res.data.token);
+      const newToken = res.data.token;
+      axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+      setToken(newToken);
       setUser(res.data.user);
       return { success: true };
     } catch (error) {
@@ -78,8 +88,14 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
-  const updateUser = (userData) => {
-    setUser(userData);
+  const updateUser = (userData, newToken) => {
+    console.log('Updating user context with:', userData);
+    setUser(prev => ({ ...prev, ...userData }));
+    if (newToken) {
+      setToken(newToken);
+      axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+      localStorage.setItem('token', newToken);
+    }
   }
 
   return (

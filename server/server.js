@@ -99,9 +99,9 @@ app.get('/api/auth/me', authenticateToken, (req, res) => {
     });
 });
 
-// User: Update Profile (Avatar, Description, Status)
+// User: Update Profile (Avatar, Username, Description, Status)
 app.put('/api/user/profile', authenticateToken, upload.single('avatar'), (req, res) => {
-  const { description, status } = req.body;
+  const { username, description, status } = req.body;
   let avatarUrl = req.body.avatarUrl; // If not updating image
   
   if (req.file) {
@@ -110,18 +110,42 @@ app.put('/api/user/profile', authenticateToken, upload.single('avatar'), (req, r
 
   const userId = req.user.id;
   
-  // Construct query dynamically based on what's provided
-  // For simplicity, we assume all might be updated, but in a real app check for undefined
-  db.run(`UPDATE users SET description = ?, status = ?, avatar = COALESCE(?, avatar) WHERE id = ?`,
-    [description, status, avatarUrl, userId],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      
-      db.get(`SELECT id, username, email, avatar, description, status FROM users WHERE id = ?`, [userId], (err, user) => {
-        res.json({ user });
-      });
-    }
-  );
+  // Update username, description, status, and avatar
+  // Using explicit values instead of COALESCE for username to ensure it updates if provided
+  const sql = `UPDATE users SET 
+    username = ?, 
+    description = ?, 
+    status = ?, 
+    avatar = COALESCE(?, avatar) 
+    WHERE id = ?`;
+  
+    console.log(`[PROFILE_UPDATE] Attempting update for user ID: ${userId} with data:`, { username, description, status, avatarUrl });
+
+    db.run(sql, [username, description, status, avatarUrl, userId], function(err) {
+        if (err) {
+          console.error("[PROFILE_UPDATE] Database error:", err.message);
+          if (err.message.includes('UNIQUE constraint failed: users.username')) {
+            return res.status(400).json({ error: 'Este nombre de usuario ya está en uso.' });
+          }
+          return res.status(500).json({ error: 'Error al actualizar base de datos' });
+        }
+        
+        console.log(`[PROFILE_UPDATE] Success. Rows changed: ${this.changes}`);
+        
+        if (this.changes === 0) {
+          console.warn(`[PROFILE_UPDATE] Warning: No rows were updated for user ID: ${userId}`);
+          return res.status(404).json({ error: 'Usuario no encontrado para actualizar' });
+        }
+        
+        db.get(`SELECT id, username, email, avatar, description, status FROM users WHERE id = ?`, [userId], (err, user) => {
+          if (err) return res.status(500).json({ error: err.message });
+          console.log("[PROFILE_UPDATE] Returning refreshed user data:", user);
+          
+          const newToken = jwt.sign({ id: user.id, username: user.username }, SECRET_KEY);
+          res.json({ user, token: newToken });
+        });
+      }
+    );
 });
 
 // User: Get User by ID (Public Profile)
@@ -293,16 +317,21 @@ app.post('/api/rooms', authenticateToken, upload.single('avatar'), (req, res) =>
       const roomId = this.lastID;
       
       // Add creator
-      db.run(`INSERT INTO room_members (room_id, user_id) VALUES (?, ?)`, [roomId, req.user.id]);
-      
-      // Add other members
-      if (members && Array.isArray(members)) {
-        members.forEach(memberId => {
-           db.run(`INSERT INTO room_members (room_id, user_id) VALUES (?, ?)`, [roomId, memberId]);
-        });
-      }
-      
-      res.json({ id: roomId, name, type, created_by: req.user.id, avatar: avatarUrl, description, max_members });
+      db.run(`INSERT INTO room_members (room_id, user_id) VALUES (?, ?)`, [roomId, req.user.id], (err) => {
+        if (err) console.error("Error adding creator to room:", err.message);
+        
+        // Add other members
+        if (members && Array.isArray(members)) {
+          members.forEach(memberId => {
+             db.run(`INSERT INTO room_members (room_id, user_id) VALUES (?, ?)`, [roomId, memberId], (err) => {
+               if (err) console.error(`Error adding member ${memberId} to room:`, err.message);
+             });
+          });
+        }
+        
+        // Send response AFTER adding the creator at least
+        res.json({ id: roomId, name, type, created_by: req.user.id, avatar: avatarUrl, description, max_members });
+      });
     }
   );
 });
@@ -386,6 +415,15 @@ app.put('/api/rooms/:roomId', authenticateToken, upload.single('avatar'), (req, 
             [name, description, avatarUrl, roomId],
             function(err) {
                 if (err) return res.status(500).json({ error: err.message });
+                
+                // Emit event to all users in the room
+                io.to(roomId).emit('room_updated', {
+                    id: parseInt(roomId),
+                    name,
+                    description,
+                    avatar: avatarUrl
+                });
+
                 res.json({ message: 'Room updated successfully', avatar: avatarUrl });
             }
         );

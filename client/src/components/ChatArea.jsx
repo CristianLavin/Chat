@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Send, Paperclip, Lock, Ban, Trash2, Info, Users } from 'lucide-react';
+import { Send, Paperclip, Lock, Ban, Trash2, Info, Users, X, ZoomIn, Smile } from 'lucide-react';
+import EmojiPicker from 'emoji-picker-react';
 import RoomDetailsModal from './RoomDetailsModal';
 import UserProfileModal from './UserProfileModal';
 
-export default function ChatArea({ socket, room, user, onDeleteRoom }) {
+export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoom }) {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [file, setFile] = useState(null);
@@ -13,8 +14,22 @@ export default function ChatArea({ socket, room, user, onDeleteRoom }) {
   const [showInfo, setShowInfo] = useState(false);
   const [viewUserId, setViewUserId] = useState(null); // For UserProfileModal
   const [selectedMessageId, setSelectedMessageId] = useState(null);
+  const [previewImage, setPreviewImage] = useState(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
+  const emojiPickerRef = useRef(null);
+
+  useEffect(() => {
+    // Close emoji picker when clicking outside
+    const handleClickOutside = (event) => {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target)) {
+        setShowEmojiPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   useEffect(() => {
     // Reset state on room change
@@ -151,6 +166,10 @@ export default function ChatArea({ socket, room, user, onDeleteRoom }) {
       fetchMessages(roomPassword);
   };
 
+  const onEmojiClick = (emojiData) => {
+    setNewMessage(prev => prev + emojiData.emoji);
+  };
+
   const handleBlockUser = async (userId) => {
       if(!confirm("Are you sure you want to block this user?")) return;
       try {
@@ -247,7 +266,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom }) {
         </div>
       </div>
 
-      {showInfo && <RoomDetailsModal room={room} onClose={() => setShowInfo(false)} />}
+      {showInfo && <RoomDetailsModal room={room} onClose={() => setShowInfo(false)} onUpdated={onUpdateRoom} />}
       {viewUserId && <UserProfileModal userId={viewUserId} onClose={() => setViewUserId(null)} />}
 
       {/* Messages */}
@@ -297,9 +316,18 @@ export default function ChatArea({ socket, room, user, onDeleteRoom }) {
                                     {/* Content based on type */}
                                     {msg.type === 'text' && <p>{msg.content}</p>}
                                     {msg.type === 'image' && (
-                                        <div className="relative">
-                                            <img src={`http://localhost:3000${msg.file_url}`} alt="Shared" className="max-w-full rounded" />
-                                            {msg.content && <p className="mt-2">{msg.content}</p>}
+                                        <div className="relative group/img cursor-pointer" onClick={() => setPreviewImage(`http://localhost:3000${msg.file_url}`)}>
+                                            <div className="max-w-[200px] max-h-[200px] overflow-hidden rounded relative">
+                                                <img 
+                                                    src={`http://localhost:3000${msg.file_url}`} 
+                                                    alt="Shared" 
+                                                    className="w-full h-full object-cover transition-transform duration-300 group-hover/img:scale-105" 
+                                                />
+                                                <div className="absolute inset-0 bg-black/20 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center">
+                                                    <ZoomIn size={24} className="text-white" />
+                                                </div>
+                                            </div>
+                                            {msg.content && <p className="mt-2 text-sm">{msg.content}</p>}
                                         </div>
                                     )}
                                     {msg.type === 'video' && (
@@ -350,6 +378,27 @@ export default function ChatArea({ socket, room, user, onDeleteRoom }) {
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Full Size Image Preview Modal */}
+      {previewImage && (
+          <div 
+            className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4 animate-in fade-in duration-200"
+            onClick={() => setPreviewImage(null)}
+          >
+              <button 
+                className="absolute top-6 right-6 text-white hover:text-gray-300 transition-colors z-[110]"
+                onClick={() => setPreviewImage(null)}
+              >
+                  <X size={32} />
+              </button>
+              <img 
+                src={previewImage} 
+                alt="Full Preview" 
+                className="max-w-full max-h-full object-contain rounded shadow-2xl animate-in zoom-in-95 duration-300" 
+                onClick={(e) => e.stopPropagation()}
+              />
+          </div>
+      )}
+
       {/* Input */}
       <div className="p-4 bg-white border-t">
         {file && (
@@ -359,6 +408,29 @@ export default function ChatArea({ socket, room, user, onDeleteRoom }) {
             </div>
         )}
         <form onSubmit={handleSendMessage} className="flex items-center space-x-2">
+            <div className="relative" ref={emojiPickerRef}>
+                <button 
+                    type="button"
+                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                    className="p-2 text-gray-500 hover:text-blue-500 hover:bg-gray-100 rounded-full transition-colors"
+                >
+                    <Smile size={24} />
+                </button>
+                
+                {showEmojiPicker && (
+                    <div className="absolute bottom-full left-0 mb-2 z-50">
+                        <EmojiPicker 
+                            onEmojiClick={onEmojiClick}
+                            autoFocusSearch={false}
+                            theme="light"
+                            searchPlaceholder="Buscar emoji..."
+                            width={300}
+                            height={400}
+                        />
+                    </div>
+                )}
+            </div>
+
             <button 
                 type="button" 
                 onClick={() => fileInputRef.current.click()} 

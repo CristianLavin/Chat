@@ -69,8 +69,12 @@ export default function Sidebar({ user, rooms, currentRoom, onSelectRoom, onOpen
                 currentRoom?.id === room.id ? 'bg-blue-100' : 'hover:bg-gray-100'
               }`}
             >
-              <div className="w-10 h-10 rounded-full bg-blue-200 flex items-center justify-center text-blue-700 font-bold">
-                {room.name.charAt(0).toUpperCase()}
+              <div className="w-10 h-10 rounded-full bg-blue-200 flex-shrink-0 overflow-hidden flex items-center justify-center text-blue-700 font-bold">
+                {room.avatar ? (
+                  <img src={`http://localhost:3000${room.avatar}`} alt="Room" className="w-full h-full object-cover" />
+                ) : (
+                  room.name.charAt(0).toUpperCase()
+                )}
               </div>
               <div className="flex-1 overflow-hidden">
                 <div className="font-medium truncate">{room.name}</div>

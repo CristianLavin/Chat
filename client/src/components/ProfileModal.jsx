@@ -5,6 +5,7 @@ import { X, Camera } from 'lucide-react';
 
 export default function ProfileModal({ onClose }) {
   const { user, updateUser } = useContext(AuthContext);
+  const [username, setUsername] = useState(user.username || '');
   const [description, setDescription] = useState(user.description || '');
   const [status, setStatus] = useState(user.status || 'online');
   const [avatar, setAvatar] = useState(null);
@@ -24,20 +25,39 @@ export default function ProfileModal({ onClose }) {
     e.preventDefault();
     setLoading(true);
     
-    const formData = new FormData();
-    formData.append('description', description);
-    formData.append('status', status);
-    if (avatar) {
-      formData.append('avatar', avatar);
-    }
-
     try {
-      const res = await axios.put('http://localhost:3000/api/user/profile', formData);
-      updateUser(res.data.user);
-      onClose();
+      console.log('Attempting profile update with:', { username, description, status, hasAvatar: !!avatar });
+      
+      let response;
+      if (avatar) {
+        // Use FormData for avatar upload
+        const formData = new FormData();
+        formData.append('username', username);
+        formData.append('description', description);
+        formData.append('status', status);
+        formData.append('avatar', avatar);
+        
+        response = await axios.put('http://localhost:3000/api/user/profile', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+      } else {
+        // Use standard JSON for text-only updates (more reliable)
+        response = await axios.put('http://localhost:3000/api/user/profile', {
+          username,
+          description,
+          status,
+          avatarUrl: user.avatar // Keep current avatar
+        });
+      }
+
+      console.log('Server response:', response.data);
+      if (response.data.user) {
+        updateUser(response.data.user, response.data.token);
+        onClose();
+      }
     } catch (error) {
-      console.error(error);
-      alert('Failed to update profile');
+      console.error('Update failed:', error);
+      alert('Failed to update profile: ' + (error.response?.data?.error || error.message));
     } finally {
       setLoading(false);
     }
@@ -65,6 +85,18 @@ export default function ProfileModal({ onClose }) {
             </div>
             <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileChange} accept="image/*" />
             <span className="text-sm text-blue-500 cursor-pointer" onClick={() => fileInputRef.current.click()}>Change Avatar</span>
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-sm font-medium mb-1">Username</label>
+            <input 
+              type="text"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              className="w-full border p-2 rounded"
+              placeholder="Your name..."
+              required
+            />
           </div>
 
           <div className="mb-4">
