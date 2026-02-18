@@ -19,6 +19,8 @@ const io = new Server(server, {
   }
 });
 
+const userSockets = {};
+
 const PORT = process.env.PORT || 3000;
 const SECRET_KEY = process.env.SECRET_KEY || 'supersecretkey';
 
@@ -475,7 +477,7 @@ app.get('/api/rooms', authenticateToken, (req, res) => {
 // Messages: Get Messages for Room
 app.get('/api/messages/:roomId', authenticateToken, (req, res) => {
     const { roomId } = req.params;
-    const { password } = req.query; // If room is password protected
+    const { password } = req.query;
 
     // Check room password if exists
     db.get(`SELECT password FROM rooms WHERE id = ?`, [roomId], (err, room) => {
@@ -495,7 +497,33 @@ app.get('/api/messages/:roomId', authenticateToken, (req, res) => {
             [req.user.id, roomId], 
             (err, rows) => {
                 if (err) return res.status(500).json({ error: err.message });
-                res.json(rows);
+
+                const messageIds = rows.map(r => r.id);
+                if (messageIds.length === 0) {
+                    return res.json(rows);
+                }
+
+                const placeholders = messageIds.map(() => '?').join(',');
+                db.all(
+                  `SELECT message_id, user_id, emoji FROM message_reactions WHERE message_id IN (${placeholders})`,
+                  messageIds,
+                  (err2, reactionRows) => {
+                    if (err2) return res.status(500).json({ error: err2.message });
+
+                    const reactionMap = {};
+                    reactionRows.forEach(r => {
+                      if (!reactionMap[r.message_id]) reactionMap[r.message_id] = [];
+                      reactionMap[r.message_id].push({ user_id: r.user_id, emoji: r.emoji });
+                    });
+
+                    const enriched = rows.map(m => ({
+                      ...m,
+                      reactions: reactionMap[m.id] || []
+                    }));
+
+                    res.json(enriched);
+                  }
+                );
             }
         );
     });
@@ -513,6 +541,12 @@ app.post('/api/upload', authenticateToken, upload.single('file'), (req, res) => 
 
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
+
+  socket.on('register_user', ({ userId }) => {
+    if (!userId) return;
+    userSockets[userId] = socket.id;
+    socket.userId = userId;
+  });
 
   socket.on('join_room', ({ roomId }) => {
     socket.join(roomId);
@@ -582,8 +616,99 @@ io.on('connection', (socket) => {
       });
   });
 
+  socket.on('add_reaction', ({ messageId, userId, emoji, roomId }) => {
+      db.run(
+        `INSERT OR IGNORE INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?)`,
+        [messageId, userId, emoji],
+        err => {
+          if (err) {
+            console.error("Error adding reaction", err);
+            return;
+          }
+          db.all(
+            `SELECT message_id, user_id, emoji FROM message_reactions WHERE message_id = ?`,
+            [messageId],
+            (err2, rows) => {
+              if (err2) {
+                console.error("Error loading reactions", err2);
+                return;
+              }
+              io.to(roomId).emit('reaction_updated', { messageId, reactions: rows });
+            }
+          );
+        }
+      );
+  });
+
+  socket.on('remove_reaction', ({ messageId, userId, emoji, roomId }) => {
+      db.run(
+        `DELETE FROM message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?`,
+        [messageId, userId, emoji],
+        err => {
+          if (err) {
+            console.error("Error removing reaction", err);
+            return;
+          }
+          db.all(
+            `SELECT message_id, user_id, emoji FROM message_reactions WHERE message_id = ?`,
+            [messageId],
+            (err2, rows) => {
+              if (err2) {
+                console.error("Error loading reactions", err2);
+                return;
+              }
+              io.to(roomId).emit('reaction_updated', { messageId, reactions: rows });
+            }
+          );
+        }
+      );
+  });
+
+  socket.on('call_user', ({ fromUserId, toUserId, roomId, isVideo }) => {
+    if (!toUserId || !fromUserId) return;
+    const targetSocketId = userSockets[toUserId];
+    if (!targetSocketId) {
+      if (roomId) {
+        io.to(roomId).emit('incoming_call', { fromUserId, roomId, isVideo: !!isVideo });
+      }
+      return;
+    }
+    io.to(targetSocketId).emit('incoming_call', { fromUserId, roomId, isVideo: !!isVideo });
+  });
+
+  socket.on('call_offer', ({ fromUserId, toUserId, offer, isVideo }) => {
+    if (!toUserId || !fromUserId || !offer) return;
+    const targetSocketId = userSockets[toUserId];
+    if (!targetSocketId) return;
+    io.to(targetSocketId).emit('call_offer', { fromUserId, offer, isVideo: !!isVideo });
+  });
+
+  socket.on('call_answer', ({ fromUserId, toUserId, answer, isVideo }) => {
+    if (!toUserId || !fromUserId || !answer) return;
+    const targetSocketId = userSockets[toUserId];
+    if (!targetSocketId) return;
+    io.to(targetSocketId).emit('call_answer', { fromUserId, answer, isVideo: !!isVideo });
+  });
+
+  socket.on('call_ice_candidate', ({ fromUserId, toUserId, candidate }) => {
+    if (!toUserId || !fromUserId || !candidate) return;
+    const targetSocketId = userSockets[toUserId];
+    if (!targetSocketId) return;
+    io.to(targetSocketId).emit('call_ice_candidate', { fromUserId, candidate });
+  });
+
+  socket.on('call_hangup', ({ fromUserId, toUserId }) => {
+    if (!toUserId || !fromUserId) return;
+    const targetSocketId = userSockets[toUserId];
+    if (!targetSocketId) return;
+    io.to(targetSocketId).emit('call_hangup', { fromUserId });
+  });
+
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
+    if (socket.userId && userSockets[socket.userId] === socket.id) {
+      delete userSockets[socket.userId];
+    }
   });
 });
 

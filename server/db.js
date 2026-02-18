@@ -102,6 +102,15 @@ function initDb() {
       FOREIGN KEY(user_id) REFERENCES users(id),
       FOREIGN KEY(message_id) REFERENCES messages(id)
     )`);
+
+    db.run(`CREATE TABLE IF NOT EXISTS message_reactions (
+      message_id INTEGER,
+      user_id INTEGER,
+      emoji TEXT,
+      PRIMARY KEY (message_id, user_id, emoji),
+      FOREIGN KEY(message_id) REFERENCES messages(id),
+      FOREIGN KEY(user_id) REFERENCES users(id)
+    )`);
   });
 }
 

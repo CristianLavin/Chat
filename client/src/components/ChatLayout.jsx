@@ -21,6 +21,12 @@ export default function ChatLayout() {
     const newSocket = io(SOCKET_URL);
     setSocket(newSocket);
 
+    newSocket.on('connect', () => {
+      if (user) {
+        newSocket.emit('register_user', { userId: user.id });
+      }
+    });
+
     newSocket.on('room_updated', (updatedRoom) => {
         setRooms(prev => prev.map(r => r.id === updatedRoom.id ? { ...r, ...updatedRoom } : r));
         setCurrentRoom(prev => {
@@ -33,6 +39,12 @@ export default function ChatLayout() {
 
     return () => newSocket.close();
   }, []);
+
+  useEffect(() => {
+    if (socket && user) {
+      socket.emit('register_user', { userId: user.id });
+    }
+  }, [socket, user]);
 
   useEffect(() => {
     if (token) {
