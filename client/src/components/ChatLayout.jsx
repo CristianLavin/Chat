@@ -100,6 +100,19 @@ export default function ChatLayout() {
       }
   };
 
+  const handleOpenAIChat = () => {
+    if (!user) return;
+    const aiRoom = {
+      id: 'ai-chat',
+      name: 'Chat con IA',
+      type: 'ai',
+      created_by: user.id,
+      description: 'Habla con un asistente de IA',
+      avatar: null
+    };
+    setCurrentRoom(aiRoom);
+  };
+
   return (
     <div className="flex h-screen bg-gray-100">
       <Sidebar 
@@ -109,6 +122,7 @@ export default function ChatLayout() {
         onSelectRoom={handleJoinRoom}
         onOpenCreateRoom={() => setShowCreateRoom(true)}
         onOpenProfile={() => setShowProfile(true)}
+        onOpenAIChat={handleOpenAIChat}
       />
       
       {currentRoom ? (

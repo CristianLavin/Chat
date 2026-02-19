@@ -40,6 +40,7 @@ export default function Login() {
             <input
               type="password"
               className="w-full border p-2 rounded"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required

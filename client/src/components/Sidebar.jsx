@@ -1,10 +1,10 @@
-import { Plus, User, LogOut, UserPlus, Users, Bell } from 'lucide-react';
+import { Plus, User, LogOut, UserPlus, Users, Bell, Bot } from 'lucide-react';
 import { useContext, useState } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import AddFriendModal from './AddFriendModal';
 import FriendRequestsModal from './FriendRequestsModal';
 
-export default function Sidebar({ user, rooms, currentRoom, onSelectRoom, onOpenCreateRoom, onOpenProfile }) {
+export default function Sidebar({ user, rooms, currentRoom, onSelectRoom, onOpenCreateRoom, onOpenProfile, onOpenAIChat }) {
   const { logout } = useContext(AuthContext);
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [showRequests, setShowRequests] = useState(false);
@@ -34,20 +34,27 @@ export default function Sidebar({ user, rooms, currentRoom, onSelectRoom, onOpen
       </div>
 
       {/* Friends Actions */}
-      <div className="p-2 border-b flex justify-around">
+      <div className="p-2 border-b flex justify-around gap-2">
         <button 
           onClick={() => setShowAddFriend(true)}
-          className="p-2 text-gray-600 hover:bg-gray-100 rounded flex flex-col items-center text-xs"
+          className="flex-1 p-2 text-gray-600 hover:bg-gray-100 rounded flex flex-col items-center text-xs"
         >
           <UserPlus size={20} className="mb-1" />
           Add Friend
         </button>
         <button 
           onClick={() => setShowRequests(true)}
-          className="p-2 text-gray-600 hover:bg-gray-100 rounded flex flex-col items-center text-xs"
+          className="flex-1 p-2 text-gray-600 hover:bg-gray-100 rounded flex flex-col items-center text-xs"
         >
           <Bell size={20} className="mb-1" />
           Requests
+        </button>
+        <button
+          onClick={onOpenAIChat}
+          className="flex-1 p-2 text-purple-700 hover:bg-purple-50 rounded flex flex-col items-center text-xs border border-purple-200"
+        >
+          <Bot size={20} className="mb-1" />
+          Chat IA
         </button>
       </div>
 

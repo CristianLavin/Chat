@@ -51,6 +51,7 @@ export default function Register() {
             <input
               type="password"
               className="w-full border p-2 rounded"
+              autoComplete="new-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required

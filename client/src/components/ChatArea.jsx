@@ -46,6 +46,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
   const peerConnectionRef = useRef(null);
   const isVideoCallRef = useRef(false);
   const pendingOfferRef = useRef(null);
+  const isAIRoom = room?.type === 'ai';
 
   useEffect(() => {
     // Close emoji picker when clicking outside
@@ -66,12 +67,18 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
     setIsLocked(false);
     setRoomPassword('');
     setSelectedMessageId(null);
-    fetchMessages();
-  }, [room.id]);
+    if (!isAIRoom) {
+      fetchMessages();
+    }
+  }, [room.id, isAIRoom]);
 
   useEffect(() => {
     const loadMembers = async () => {
       if (!user) return;
+      if (isAIRoom) {
+        setCallTargetId(null);
+        return;
+      }
       try {
         const res = await axios.get(`http://localhost:3000/api/rooms/${room.id}/details`);
         const others = (res.data.members || []).filter(m => m.id !== user.id);
@@ -88,7 +95,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
     setCallState('idle');
     setIsVideoCall(false);
     setRemoteUserId(null);
-  }, [room.id, user]);
+  }, [room.id, user, isAIRoom]);
 
   useEffect(() => {
     if (!user) return;
@@ -109,7 +116,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
   }, [room.id, user]);
 
   useEffect(() => {
-    if (!socket) return;
+    if (!socket || isAIRoom) return;
 
     const handleReceiveMessage = (message) => {
         if (message.room_id === room.id) {
@@ -394,8 +401,239 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const formatAIImageError = (raw) => {
+    if (!raw) return null;
+    const text = String(raw);
+    if (text.includes('You exceeded your current quota') || text.includes('Quota exceeded for metric')) {
+      return 'Tu cuenta de imágenes de IA no tiene cuota disponible. Revisa el plan y la facturación del proveedor.';
+    }
+    const lower = text.toLowerCase();
+    if (lower.includes('invalid api key') || lower.includes('incorrect api key')) {
+      return 'La clave de la API de imágenes no es válida. Revisa la configuración del servidor.';
+    }
+    return text;
+  };
+
+  const [aiMode, setAiMode] = useState('text');
+
+  const handleSendAIChat = async () => {
+    const content = newMessage.trim();
+    if (!content || !user) return;
+
+    const userMessage = {
+      id: Date.now(),
+      room_id: room.id,
+      sender_id: user.id,
+      content,
+      type: 'text',
+      file_url: null,
+      created_at: new Date(),
+      username: user.username,
+      avatar: user.avatar,
+      is_deleted: 0
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    setNewMessage('');
+
+    try {
+      const res = await axios.post('http://localhost:3000/api/ai/chat', { message: content });
+      const answer = res.data && res.data.answer ? res.data.answer : 'No he podido generar una respuesta.';
+      const aiMessage = {
+        id: Date.now() + 1,
+        room_id: room.id,
+        sender_id: 0,
+        content: answer,
+        type: 'text',
+        file_url: null,
+        created_at: new Date(),
+        username: 'IA',
+        avatar: null,
+        is_deleted: 0
+      };
+      setMessages(prev => [...prev, aiMessage]);
+
+      const lower = content.toLowerCase();
+      if (lower.includes('imagen') || lower.includes('image') || lower.includes('foto')) {
+        const loadingId = Date.now() + 2;
+        const loadingMessage = {
+          id: loadingId,
+          room_id: room.id,
+          sender_id: 0,
+          content: 'Estoy generando una imagen, esto puede tardar unos segundos...',
+          type: 'text',
+          file_url: null,
+          created_at: new Date(),
+          username: 'IA',
+          avatar: null,
+          is_deleted: 0
+        };
+        setMessages(prev => [...prev, loadingMessage]);
+
+        try {
+          const imgRes = await axios.post('http://localhost:3000/api/ai/image', { prompt: content });
+          const imageUrl = imgRes.data && imgRes.data.imageUrl ? imgRes.data.imageUrl : null;
+          const errorText = formatAIImageError(
+            imgRes.data && imgRes.data.error ? imgRes.data.error : null
+          );
+
+          if (imageUrl) {
+            const aiImageMessage = {
+              id: Date.now() + 3,
+              room_id: room.id,
+              sender_id: 0,
+              content: content,
+              type: 'image',
+              file_url: imageUrl,
+              created_at: new Date(),
+              username: 'IA',
+              avatar: null,
+              is_deleted: 0
+            };
+            setMessages(prev =>
+              prev.map(m => (m.id === loadingId ? aiImageMessage : m))
+            );
+          } else {
+            const errorMessage = {
+              id: loadingId,
+              room_id: room.id,
+              sender_id: 0,
+              content:
+                errorText ||
+                'No se pudo generar la imagen con Cloudflare Workers AI, pero puedes seguir chateando aquí.',
+              type: 'text',
+              file_url: null,
+              created_at: new Date(),
+              username: 'IA',
+              avatar: null,
+              is_deleted: 0
+            };
+            setMessages(prev =>
+              prev.map(m => (m.id === loadingId ? errorMessage : m))
+            );
+          }
+        } catch (e) {
+          const errorMessage = {
+            id: loadingId,
+            room_id: room.id,
+            sender_id: 0,
+            content: 'Ha habido un error al generar la imagen.',
+            type: 'text',
+            file_url: null,
+            created_at: new Date(),
+            username: 'IA',
+            avatar: null,
+            is_deleted: 0
+          };
+          setMessages(prev =>
+            prev.map(m => (m.id === loadingId ? errorMessage : m))
+          );
+        }
+      }
+      scrollToBottom();
+    } catch (err) {
+      const errorMessage = {
+        id: Date.now() + 2,
+        room_id: room.id,
+        sender_id: 0,
+        content: 'Ha habido un error al contactar con la IA.',
+        type: 'text',
+        file_url: null,
+        created_at: new Date(),
+        username: 'IA',
+        avatar: null,
+        is_deleted: 0
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    }
+  };
+
+  const handleGenerateAIImage = async () => {
+    const content = newMessage.trim();
+    if (!content || !user) return;
+
+    const userMessage = {
+      id: Date.now(),
+      room_id: room.id,
+      sender_id: user.id,
+      content,
+      type: 'text',
+      file_url: null,
+      created_at: new Date(),
+      username: user.username,
+      avatar: user.avatar,
+      is_deleted: 0
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    setNewMessage('');
+
+    try {
+        const res = await axios.post('http://localhost:3000/api/ai/image', { prompt: content });
+      const imageUrl = res.data && res.data.imageUrl ? res.data.imageUrl : null;
+      const errorText = formatAIImageError(
+        res.data && res.data.error ? res.data.error : null
+      );
+
+      if (imageUrl) {
+        const aiMessage = {
+          id: Date.now() + 1,
+          room_id: room.id,
+          sender_id: 0,
+          content: content,
+          type: 'image',
+          file_url: imageUrl,
+          created_at: new Date(),
+          username: 'IA',
+          avatar: null,
+          is_deleted: 0
+        };
+        setMessages(prev => [...prev, aiMessage]);
+      } else {
+        const errorMessage = {
+          id: Date.now() + 2,
+          room_id: room.id,
+          sender_id: 0,
+          content:
+            errorText ||
+            'No se pudo generar la imagen con Cloudflare Workers AI, pero puedes seguir chateando aquí.',
+          type: 'text',
+          file_url: null,
+          created_at: new Date(),
+          username: 'IA',
+          avatar: null,
+          is_deleted: 0
+        };
+        setMessages(prev => [...prev, errorMessage]);
+      }
+      scrollToBottom();
+    } catch (err) {
+      const errorMessage = {
+        id: Date.now() + 2,
+        room_id: room.id,
+        sender_id: 0,
+        content: 'Ha habido un error al generar la imagen.',
+        type: 'text',
+        file_url: null,
+        created_at: new Date(),
+        username: 'IA',
+        avatar: null,
+        is_deleted: 0
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    }
+  };
+
   const handleSendMessage = async (e) => {
     e.preventDefault();
+    if (isAIRoom) {
+      if (aiMode === 'image') {
+        await handleGenerateAIImage();
+      } else {
+        await handleSendAIChat();
+      }
+      return;
+    }
     if ((!newMessage.trim() && !file) || isLocked) return;
 
     let fileUrl = null;
@@ -473,7 +711,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
   };
 
   const handleToggleReaction = (messageId, emoji) => {
-    if (!socket) return;
+    if (isAIRoom || !socket) return;
     const msg = messages.find(m => m.id === messageId);
     if (!msg) return;
     const current = msg.reactions || [];
@@ -515,6 +753,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
   };
 
   const handleDeleteRoom = async () => {
+      if (isAIRoom) return;
       const isCreator = room.created_by === user.id;
       const confirmMsg = isCreator 
         ? "Are you sure you want to DELETE this room? It will be removed for everyone." 
@@ -543,6 +782,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
                     value={roomPassword}
                     onChange={(e) => setRoomPassword(e.target.value)}
                     className="border p-2 rounded"
+                    autoComplete="current-password"
                 />
                 <button type="submit" className="bg-blue-500 text-white p-2 rounded">Unlock</button>
             </form>
@@ -597,7 +837,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
       <div className="p-3 border-b bg-white flex justify-between items-center shadow-sm">
         <div 
             className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-2 rounded-lg transition-colors flex-1"
-            onClick={() => setShowInfo(true)}
+            onClick={() => !isAIRoom && setShowInfo(true)}
         >
             <div className="w-10 h-10 rounded-full bg-gray-200 flex-shrink-0 overflow-hidden">
                 {room.avatar ? (
@@ -661,7 +901,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
                     onChange={handleBackgroundImageChange}
                 />
             </div>
-            {callTargetId && (
+            {callTargetId && !isAIRoom && (
               <>
                 <button
                   type="button"
@@ -683,25 +923,29 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
                 </button>
               </>
             )}
-            <button 
-                onClick={() => setShowInfo(true)}
-                className="text-gray-400 hover:text-blue-500 p-2 rounded hover:bg-blue-50"
-                title="Room Info"
-            >
-                <Info size={20} />
-            </button>
-            <button 
-                onClick={handleDeleteRoom} 
-                className="text-gray-400 hover:text-red-500 p-2 rounded hover:bg-red-50"
-                title={room.created_by === user.id ? "Delete Room" : "Leave Room"}
-            >
-                <Trash2 size={20} />
-            </button>
+            {!isAIRoom && (
+              <>
+                <button 
+                    onClick={() => setShowInfo(true)}
+                    className="text-gray-400 hover:text-blue-500 p-2 rounded hover:bg-blue-50"
+                    title="Room Info"
+                >
+                    <Info size={20} />
+                </button>
+                <button 
+                    onClick={handleDeleteRoom} 
+                    className="text-gray-400 hover:text-red-500 p-2 rounded hover:bg-red-50"
+                    title={room.created_by === user.id ? "Delete Room" : "Leave Room"}
+                >
+                    <Trash2 size={20} />
+                </button>
+              </>
+            )}
         </div>
       </div>
 
-      {showInfo && <RoomDetailsModal room={room} onClose={() => setShowInfo(false)} onUpdated={onUpdateRoom} />}
-      {viewUserId && <UserProfileModal userId={viewUserId} onClose={() => setViewUserId(null)} />}
+      {showInfo && !isAIRoom && <RoomDetailsModal room={room} onClose={() => setShowInfo(false)} onUpdated={onUpdateRoom} />}
+      {viewUserId && !isAIRoom && <UserProfileModal userId={viewUserId} onClose={() => setViewUserId(null)} />}
 
       {callState !== 'idle' && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-40">
@@ -839,11 +1083,26 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
                                     
                                     {/* Content based on type */}
                                     {msg.type === 'text' && <p>{msg.content}</p>}
-                                    {msg.type === 'image' && (
-                                        <div className="relative group/img cursor-pointer" onClick={() => setPreviewImage(`http://localhost:3000${msg.file_url}`)}>
+                                    {msg.type === 'image' && msg.file_url && (
+                                        <div
+                                          className="relative group/img cursor-pointer"
+                                          onClick={() => {
+                                            const src =
+                                              msg.file_url.startsWith('http') ||
+                                              msg.file_url.startsWith('data:')
+                                                ? msg.file_url
+                                                : `http://localhost:3000${msg.file_url}`;
+                                            setPreviewImage(src);
+                                          }}
+                                        >
                                             <div className="max-w-[200px] max-h-[200px] overflow-hidden rounded relative">
                                                 <img 
-                                                    src={`http://localhost:3000${msg.file_url}`} 
+                                                    src={
+                                                      msg.file_url.startsWith('http') ||
+                                                      msg.file_url.startsWith('data:')
+                                                        ? msg.file_url
+                                                        : `http://localhost:3000${msg.file_url}`
+                                                    }
                                                     alt="Shared" 
                                                     className="w-full h-full object-cover transition-transform duration-300 group-hover/img:scale-105" 
                                                 />
@@ -1057,19 +1316,51 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
                 </div>
             </div>
 
-            <button 
-                type="button" 
-                onClick={() => fileInputRef.current.click()} 
-                className="p-2 text-gray-500 hover:bg-gray-100 rounded-full"
-            >
-                <Paperclip size={20} />
-            </button>
-            <input 
-                type="file" 
-                ref={fileInputRef} 
-                className="hidden" 
-                onChange={(e) => setFile(e.target.files[0])}
-            />
+            {!isAIRoom && (
+              <>
+                <button 
+                    type="button" 
+                    onClick={() => fileInputRef.current.click()} 
+                    className="p-2 text-gray-500 hover:bg-gray-100 rounded-full"
+                >
+                    <Paperclip size={20} />
+                </button>
+                <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    className="hidden" 
+                    onChange={(e) => setFile(e.target.files[0])}
+                />
+              </>
+            )}
+            {isAIRoom && (
+              <div className="mr-2 flex items-center">
+                <div className="inline-flex rounded-full bg-gray-200 p-1 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setAiMode('text')}
+                    className={`px-2 py-1 rounded-full ${
+                      aiMode === 'text'
+                        ? 'bg-white text-gray-900 shadow'
+                        : 'text-gray-600'
+                    }`}
+                  >
+                    Texto
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAiMode('image')}
+                    className={`px-2 py-1 rounded-full ${
+                      aiMode === 'image'
+                        ? 'bg-white text-gray-900 shadow'
+                        : 'text-gray-600'
+                    }`}
+                  >
+                    Imagen
+                  </button>
+                </div>
+              </div>
+            )}
             <input 
                 type="text" 
                 className="flex-1 border rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
