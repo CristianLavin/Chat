@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { X, User, Ban, UserPlus, Check } from 'lucide-react';
+import { resolveMediaUrl } from '../lib/config';
 
 export default function UserProfileModal({ userId, onClose }) {
   const [profile, setProfile] = useState(null);
@@ -12,7 +13,7 @@ export default function UserProfileModal({ userId, onClose }) {
 
   const fetchProfile = async () => {
     try {
-      const res = await axios.get(`http://localhost:3000/api/users/${userId}`);
+      const res = await axios.get(`/api/users/${userId}`);
       setProfile(res.data);
     } catch (error) {
       console.error("Error fetching user profile", error);
@@ -24,7 +25,7 @@ export default function UserProfileModal({ userId, onClose }) {
   const handleBlockUser = async () => {
       if(!confirm("Are you sure you want to block this user?")) return;
       try {
-          await axios.post('http://localhost:3000/api/friends/block', { userId });
+          await axios.post('/api/friends/block', { userId });
           alert("User blocked");
           onClose();
       } catch (err) {
@@ -35,7 +36,7 @@ export default function UserProfileModal({ userId, onClose }) {
 
   const handleAddFriend = async () => {
       try {
-          await axios.post('http://localhost:3000/api/friends/request', { addresseeId: userId });
+          await axios.post('/api/friends/request', { addresseeId: userId });
           alert("Friend request sent");
           fetchProfile(); // Refresh status
       } catch (err) {
@@ -56,7 +57,7 @@ export default function UserProfileModal({ userId, onClose }) {
 
         <div className="w-24 h-24 rounded-full bg-gray-200 overflow-hidden mb-4 border-4 border-white shadow">
             {profile.avatar ? (
-                <img src={`http://localhost:3000${profile.avatar}`} alt="Avatar" className="w-full h-full object-cover" />
+                <img src={resolveMediaUrl(profile.avatar)} alt="Avatar" className="w-full h-full object-cover" />
             ) : (
                 <div className="w-full h-full flex items-center justify-center text-gray-400">
                     <User size={48} />

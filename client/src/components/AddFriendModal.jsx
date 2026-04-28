@@ -2,6 +2,7 @@ import { useState, useContext } from 'react';
 import axios from 'axios';
 import { X, Search, UserPlus } from 'lucide-react';
 import { AuthContext } from '../context/AuthContext';
+import { resolveMediaUrl } from '../lib/config';
 
 export default function AddFriendModal({ onClose }) {
   const { token } = useContext(AuthContext);
@@ -19,7 +20,7 @@ export default function AddFriendModal({ onClose }) {
     setLoading(true);
     
     try {
-      const res = await axios.get(`http://localhost:3000/api/users/search?email=${email}`);
+      const res = await axios.get(`/api/users/search?email=${encodeURIComponent(email)}`);
       setFoundUser(res.data);
     } catch (err) {
       if (err.response?.status === 404) {
@@ -35,7 +36,7 @@ export default function AddFriendModal({ onClose }) {
   const handleAddFriend = async () => {
     if (!foundUser) return;
     try {
-      await axios.post('http://localhost:3000/api/friends/request', { addresseeId: foundUser.id });
+      await axios.post('/api/friends/request', { addresseeId: foundUser.id });
       setMessage('Friend request sent!');
       setFoundUser(null);
       setEmail('');
@@ -76,7 +77,7 @@ export default function AddFriendModal({ onClose }) {
           <div className="border rounded-lg p-4 bg-gray-50 flex flex-col items-center">
              <div className="w-16 h-16 rounded-full bg-gray-300 overflow-hidden mb-2">
                 {foundUser.avatar ? (
-                    <img src={`http://localhost:3000${foundUser.avatar}`} className="w-full h-full object-cover" />
+                    <img src={resolveMediaUrl(foundUser.avatar)} className="w-full h-full object-cover" />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center text-xl font-bold">
                         {foundUser.username.charAt(0).toUpperCase()}

@@ -2,6 +2,7 @@ import { useState, useEffect, useContext } from 'react';
 import axios from 'axios';
 import { X, User, Shield, Edit2, Save, Camera } from 'lucide-react';
 import { AuthContext } from '../context/AuthContext';
+import { resolveMediaUrl } from '../lib/config';
 
 export default function RoomDetailsModal({ room, onClose, onUpdated }) {
   const { user } = useContext(AuthContext);
@@ -21,7 +22,7 @@ export default function RoomDetailsModal({ room, onClose, onUpdated }) {
 
   const fetchDetails = async () => {
     try {
-      const res = await axios.get(`http://localhost:3000/api/rooms/${room.id}/details`);
+      const res = await axios.get(`/api/rooms/${room.id}/details`);
       setDetails(res.data);
       setEditName(res.data.name);
       setEditDesc(res.data.description || '');
@@ -49,7 +50,7 @@ export default function RoomDetailsModal({ room, onClose, onUpdated }) {
       }
 
       try {
-          const res = await axios.put(`http://localhost:3000/api/rooms/${room.id}`, formData, {
+          const res = await axios.put(`/api/rooms/${room.id}`, formData, {
               headers: { 'Content-Type': 'multipart/form-data' }
           });
           
@@ -100,7 +101,7 @@ export default function RoomDetailsModal({ room, onClose, onUpdated }) {
                     {previewAvatar ? (
                         <img src={previewAvatar} alt="Preview" className="w-full h-full object-cover" />
                     ) : details?.avatar ? (
-                        <img src={`http://localhost:3000${details.avatar}`} alt="Room Avatar" className="w-full h-full object-cover" />
+                        <img src={resolveMediaUrl(details.avatar)} alt="Room Avatar" className="w-full h-full object-cover" />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center text-gray-400">
                             <User size={48} />
@@ -163,7 +164,7 @@ export default function RoomDetailsModal({ room, onClose, onUpdated }) {
                     <div key={member.id} className="flex items-center p-2 hover:bg-gray-50 rounded">
                         <div className="w-8 h-8 rounded-full bg-gray-300 mr-3 overflow-hidden">
                             {member.avatar ? (
-                                <img src={`http://localhost:3000${member.avatar}`} className="w-full h-full object-cover" />
+                                <img src={resolveMediaUrl(member.avatar)} className="w-full h-full object-cover" />
                             ) : (
                                 <div className="w-full h-full flex items-center justify-center text-xs font-bold">
                                     {member.username.charAt(0).toUpperCase()}

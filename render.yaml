@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: chat-backend
+    env: node
+    rootDir: server
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: MONGODB_URI
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: CLIENT_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: CF_ACCOUNT_ID
+        sync: false
+      - key: CF_AI_API_TOKEN
+        sync: false
+      - key: CF_IMAGE_MODEL
+        value: "@cf/stabilityai/stable-diffusion-xl-base-1.0"

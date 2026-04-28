@@ -4,6 +4,7 @@ import { Send, Paperclip, Lock, Ban, Trash2, Info, Users, X, ZoomIn, Smile, Imag
 import EmojiPicker from 'emoji-picker-react';
 import RoomDetailsModal from './RoomDetailsModal';
 import UserProfileModal from './UserProfileModal';
+import { resolveMediaUrl } from '../lib/config';
 
 const STICKERS = [
   { id: 'smile', url: 'https://twemoji.maxcdn.com/v/latest/svg/1f600.svg' },
@@ -80,7 +81,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
         return;
       }
       try {
-        const res = await axios.get(`http://localhost:3000/api/rooms/${room.id}/details`);
+        const res = await axios.get(`/api/rooms/${room.id}/details`);
         const others = (res.data.members || []).filter(m => m.id !== user.id);
         if (others.length === 1) {
           setCallTargetId(others[0].id);
@@ -384,7 +385,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
 
   const fetchMessages = async (password = '') => {
     try {
-      const res = await axios.get(`http://localhost:3000/api/messages/${room.id}`, {
+      const res = await axios.get(`/api/messages/${room.id}`, {
         params: { password }
       });
       setMessages(res.data);
@@ -437,7 +438,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
     setNewMessage('');
 
     try {
-      const res = await axios.post('http://localhost:3000/api/ai/chat', { message: content });
+      const res = await axios.post('/api/ai/chat', { message: content });
       const answer = res.data && res.data.answer ? res.data.answer : 'No he podido generar una respuesta.';
       const aiMessage = {
         id: Date.now() + 1,
@@ -471,7 +472,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
         setMessages(prev => [...prev, loadingMessage]);
 
         try {
-          const imgRes = await axios.post('http://localhost:3000/api/ai/image', { prompt: content });
+          const imgRes = await axios.post('/api/ai/image', { prompt: content });
           const imageUrl = imgRes.data && imgRes.data.imageUrl ? imgRes.data.imageUrl : null;
           const errorText = formatAIImageError(
             imgRes.data && imgRes.data.error ? imgRes.data.error : null
@@ -569,7 +570,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
     setNewMessage('');
 
     try {
-        const res = await axios.post('http://localhost:3000/api/ai/image', { prompt: content });
+        const res = await axios.post('/api/ai/image', { prompt: content });
       const imageUrl = res.data && res.data.imageUrl ? res.data.imageUrl : null;
       const errorText = formatAIImageError(
         res.data && res.data.error ? res.data.error : null
@@ -643,7 +644,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
         const formData = new FormData();
         formData.append('file', file);
         try {
-            const uploadRes = await axios.post('http://localhost:3000/api/upload', formData);
+            const uploadRes = await axios.post('/api/upload', formData);
             fileUrl = uploadRes.data.fileUrl;
             
             // Determine type
@@ -700,7 +701,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
     const formData = new FormData();
     formData.append('file', stickerFile);
     try {
-      const uploadRes = await axios.post('http://localhost:3000/api/upload', formData);
+      const uploadRes = await axios.post('/api/upload', formData);
       const fileUrl = uploadRes.data.fileUrl;
       handleSendSticker(fileUrl);
     } catch (err) {
@@ -744,7 +745,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
   const handleBlockUser = async (userId) => {
       if(!confirm("Are you sure you want to block this user?")) return;
       try {
-          await axios.post('http://localhost:3000/api/friends/block', { userId });
+          await axios.post('/api/friends/block', { userId });
           alert("User blocked");
       } catch (err) {
           console.error(err);
@@ -762,7 +763,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
       if (!confirm(confirmMsg)) return;
 
       try {
-          await axios.delete(`http://localhost:3000/api/rooms/${room.id}`);
+          await axios.delete(`/api/rooms/${room.id}`);
           onDeleteRoom(room.id);
       } catch (err) {
           console.error(err);
@@ -841,7 +842,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
         >
             <div className="w-10 h-10 rounded-full bg-gray-200 flex-shrink-0 overflow-hidden">
                 {room.avatar ? (
-                    <img src={`http://localhost:3000${room.avatar}`} alt="Room" className="w-full h-full object-cover" />
+                    <img src={resolveMediaUrl(room.avatar)} alt="Room" className="w-full h-full object-cover" />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center text-gray-500">
                         <Users size={20} />
@@ -1053,7 +1054,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
                                     title="View Profile"
                                  >
                                     {msg.avatar ? (
-                                        <img src={`http://localhost:3000${msg.avatar}`} alt="Av" className="w-full h-full object-cover" />
+                                        <img src={resolveMediaUrl(msg.avatar)} alt="Av" className="w-full h-full object-cover" />
                                     ) : (
                                         <div className="w-full h-full flex items-center justify-center text-xs font-bold">
                                             {msg.username.charAt(0).toUpperCase()}
@@ -1087,22 +1088,12 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
                                         <div
                                           className="relative group/img cursor-pointer"
                                           onClick={() => {
-                                            const src =
-                                              msg.file_url.startsWith('http') ||
-                                              msg.file_url.startsWith('data:')
-                                                ? msg.file_url
-                                                : `http://localhost:3000${msg.file_url}`;
-                                            setPreviewImage(src);
+                                            setPreviewImage(resolveMediaUrl(msg.file_url));
                                           }}
                                         >
                                             <div className="max-w-[200px] max-h-[200px] overflow-hidden rounded relative">
                                                 <img 
-                                                    src={
-                                                      msg.file_url.startsWith('http') ||
-                                                      msg.file_url.startsWith('data:')
-                                                        ? msg.file_url
-                                                        : `http://localhost:3000${msg.file_url}`
-                                                    }
+                                                    src={resolveMediaUrl(msg.file_url)}
                                                     alt="Shared" 
                                                     className="w-full h-full object-cover transition-transform duration-300 group-hover/img:scale-105" 
                                                 />
@@ -1116,7 +1107,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
                                     {msg.type === 'sticker' && msg.file_url && (
                                         <div className="relative max-w-[160px] max-h-[160px]">
                                             <img
-                                              src={msg.file_url.startsWith('http') ? msg.file_url : `http://localhost:3000${msg.file_url}`}
+                                              src={resolveMediaUrl(msg.file_url)}
                                               alt="Sticker"
                                               className="w-full h-full object-contain"
                                             />
@@ -1124,18 +1115,18 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
                                     )}
                                     {msg.type === 'video' && (
                                         <div className="relative">
-                                            <video controls src={`http://localhost:3000${msg.file_url}`} className="max-w-full rounded" />
+                                            <video controls src={resolveMediaUrl(msg.file_url)} className="max-w-full rounded" />
                                             {msg.content && <p className="mt-2">{msg.content}</p>}
                                         </div>
                                     )}
                                     {msg.type === 'audio' && (
                                         <div className="relative">
-                                            <audio controls src={`http://localhost:3000${msg.file_url}`} />
+                                            <audio controls src={resolveMediaUrl(msg.file_url)} />
                                             {msg.content && <p className="mt-2">{msg.content}</p>}
                                         </div>
                                     )}
                                     {msg.type === 'file' && (
-                                        <a href={`http://localhost:3000${msg.file_url}`} target="_blank" rel="noreferrer" className="flex items-center underline">
+                                        <a href={resolveMediaUrl(msg.file_url)} target="_blank" rel="noreferrer" className="flex items-center underline">
                                             <Paperclip size={16} className="mr-1" />
                                             Download File
                                         </a>

@@ -6,8 +6,7 @@ import Sidebar from './Sidebar';
 import ChatArea from './ChatArea';
 import CreateRoomModal from './CreateRoomModal';
 import ProfileModal from './ProfileModal';
-
-const SOCKET_URL = 'http://localhost:3000';
+import { SOCKET_URL } from '../lib/config';
 
 export default function ChatLayout() {
   const { user, token } = useContext(AuthContext);
@@ -18,7 +17,9 @@ export default function ChatLayout() {
   const [showProfile, setShowProfile] = useState(false);
 
   useEffect(() => {
-    const newSocket = io(SOCKET_URL);
+    const newSocket = io(SOCKET_URL, {
+      transports: ['websocket', 'polling']
+    });
     setSocket(newSocket);
 
     newSocket.on('connect', () => {
@@ -55,7 +56,7 @@ export default function ChatLayout() {
   const fetchRooms = async () => {
     if (!token) return;
     try {
-      const res = await axios.get('http://localhost:3000/api/rooms', {
+      const res = await axios.get('/api/rooms', {
         headers: { Authorization: `Bearer ${token}` }
       });
       setRooms(res.data);

@@ -2,6 +2,7 @@ import { useState, useEffect, useContext } from 'react';
 import axios from 'axios';
 import { X, Check, UserX } from 'lucide-react';
 import { AuthContext } from '../context/AuthContext';
+import { resolveMediaUrl } from '../lib/config';
 
 export default function FriendRequestsModal({ onClose }) {
   const [requests, setRequests] = useState([]);
@@ -13,7 +14,7 @@ export default function FriendRequestsModal({ onClose }) {
 
   const fetchRequests = async () => {
     try {
-      const res = await axios.get('http://localhost:3000/api/friends/requests');
+      const res = await axios.get('/api/friends/requests');
       setRequests(res.data);
     } catch (error) {
       console.error(error);
@@ -24,7 +25,7 @@ export default function FriendRequestsModal({ onClose }) {
 
   const handleRespond = async (friendshipId, action) => {
       try {
-          await axios.put('http://localhost:3000/api/friends/respond', { friendshipId, action });
+          await axios.put('/api/friends/respond', { friendshipId, action });
           // Remove from list
           setRequests(requests.filter(r => r.id !== friendshipId));
       } catch (err) {
@@ -51,7 +52,7 @@ export default function FriendRequestsModal({ onClose }) {
                         <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-full bg-gray-300 overflow-hidden">
                                 {req.avatar ? (
-                                    <img src={`http://localhost:3000${req.avatar}`} className="w-full h-full object-cover" />
+                                    <img src={resolveMediaUrl(req.avatar)} className="w-full h-full object-cover" />
                                 ) : (
                                     <div className="w-full h-full flex items-center justify-center font-bold">
                                         {req.username.charAt(0).toUpperCase()}

@@ -2,6 +2,7 @@ import { useState, useContext, useRef } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import { X, Camera } from 'lucide-react';
+import { resolveMediaUrl } from '../lib/config';
 
 export default function ProfileModal({ onClose }) {
   const { user, updateUser } = useContext(AuthContext);
@@ -9,7 +10,7 @@ export default function ProfileModal({ onClose }) {
   const [description, setDescription] = useState(user.description || '');
   const [status, setStatus] = useState(user.status || 'online');
   const [avatar, setAvatar] = useState(null);
-  const [preview, setPreview] = useState(user.avatar ? `http://localhost:3000${user.avatar}` : null);
+  const [preview, setPreview] = useState(resolveMediaUrl(user.avatar));
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -37,12 +38,12 @@ export default function ProfileModal({ onClose }) {
         formData.append('status', status);
         formData.append('avatar', avatar);
         
-        response = await axios.put('http://localhost:3000/api/user/profile', formData, {
+        response = await axios.put('/api/user/profile', formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
       } else {
         // Use standard JSON for text-only updates (more reliable)
-        response = await axios.put('http://localhost:3000/api/user/profile', {
+        response = await axios.put('/api/user/profile', {
           username,
           description,
           status,

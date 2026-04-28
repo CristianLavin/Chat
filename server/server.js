@@ -7,20 +7,19 @@ const fs = require('fs');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const db = require('./db');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+
+const {
+  connectDB,
+  mongoose,
+  User,
+  Friendship,
+  Room,
+  Message
+} = require('./db');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: "*", // In production, restrict this
-    methods: ["GET", "POST"]
-  }
-});
-
-const userSockets = {};
 
 const PORT = process.env.PORT || 3000;
 const SECRET_KEY = process.env.SECRET_KEY || 'supersecretkey';
@@ -29,516 +28,620 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID || '';
 const CF_AI_API_TOKEN = process.env.CF_AI_API_TOKEN || '';
 const CF_IMAGE_MODEL =
-  process.env.CF_IMAGE_MODEL || '@cf/black-forest-labs/flux-1-schnell';
+  process.env.CF_IMAGE_MODEL || '@cf/stabilityai/stable-diffusion-xl-base-1.0';
+const CLIENT_URL = process.env.CLIENT_URL || process.env.FRONTEND_URL || '';
 
-app.use(cors());
-app.use(express.json());
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+const userSockets = {};
+const allowedOrigins = CLIENT_URL
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
 
-// Ensure uploads directory exists
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir);
-}
-
-// Multer storage configuration
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'uploads/')
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9)
-    cb(null, uniqueSuffix + '-' + file.originalname)
+const io = new Server(server, {
+  cors: {
+    origin: allowedOrigins.length ? allowedOrigins : '*',
+    methods: ['GET', 'POST']
   }
 });
-const upload = multer({ storage: storage });
 
-// --- Middleware ---
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
+app.use(
+  cors({
+    origin: allowedOrigins.length ? allowedOrigins : true
+  })
+);
+app.use(express.json({ limit: '10mb' }));
+
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+app.use('/uploads', express.static(uploadDir));
+
+const storage = multer.diskStorage({
+  destination(req, file, cb) {
+    cb(null, uploadDir);
+  },
+  filename(req, file, cb) {
+    const safeOriginalName = file.originalname.replace(/\s+/g, '-');
+    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    cb(null, `${uniqueSuffix}-${safeOriginalName}`);
+  }
+});
+const upload = multer({ storage });
+
+function isValidObjectId(value) {
+  return mongoose.Types.ObjectId.isValid(value);
+}
+
+function signToken(user) {
+  return jwt.sign({ id: user._id.toString(), username: user.username }, SECRET_KEY);
+}
+
+function toUserResponse(user) {
+  return {
+    id: user._id.toString(),
+    username: user.username,
+    email: user.email,
+    avatar: user.avatar || null,
+    description: user.description || '',
+    status: user.status || 'online'
+  };
+}
+
+function toRoomResponse(room) {
+  return {
+    id: room._id.toString(),
+    name: room.name,
+    type: room.type,
+    password: room.password ? 'protected' : null,
+    created_by: room.createdBy.toString(),
+    avatar: room.avatar || null,
+    description: room.description || '',
+    max_members: Number(room.maxMembers || 0)
+  };
+}
+
+function toMessageResponse(message, senderOverride) {
+  const sender = senderOverride || message.senderId;
+  const senderId = sender && sender._id ? sender._id.toString() : message.senderId.toString();
+
+  return {
+    id: message._id.toString(),
+    room_id: message.roomId.toString(),
+    sender_id: senderId,
+    content: message.content || '',
+    type: message.type,
+    file_url: message.fileUrl || null,
+    created_at: message.createdAt,
+    username: sender && sender.username ? sender.username : '',
+    avatar: sender && sender.avatar ? sender.avatar : null,
+    is_deleted: message.isDeleted ? 1 : 0,
+    reactions: (message.reactions || []).map(reaction => ({
+      user_id: reaction.userId.toString(),
+      emoji: reaction.emoji
+    }))
+  };
+}
+
+async function findFriendshipBetween(userA, userB) {
+  return Friendship.findOne({
+    $or: [
+      { requesterId: userA, addresseeId: userB },
+      { requesterId: userB, addresseeId: userA }
+    ]
+  });
+}
+
+async function serializeRoomWithMembers(room) {
+  const members = await User.find({ _id: { $in: room.members } })
+    .select('username email avatar status')
+    .lean();
+
+  return {
+    ...toRoomResponse(room),
+    members: members.map(member => ({
+      id: member._id.toString(),
+      username: member.username,
+      email: member.email,
+      avatar: member.avatar || null,
+      status: member.status || 'online'
+    }))
+  };
+}
+
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers.authorization;
   const token = authHeader && authHeader.split(' ')[1];
-  if (token == null) return res.sendStatus(401);
+  if (!token) {
+    return res.sendStatus(401);
+  }
 
   jwt.verify(token, SECRET_KEY, (err, user) => {
-    if (err) return res.sendStatus(403);
+    if (err) {
+      return res.sendStatus(403);
+    }
     req.user = user;
     next();
   });
-};
+}
 
-// --- Routes ---
-
-// Auth: Register
-app.post('/api/register', async (req, res) => {
-  const { username, email, password } = req.body;
-  const hashedPassword = await bcrypt.hash(password, 10);
-
-  db.run(`INSERT INTO users (username, email, password) VALUES (?, ?, ?)`,
-    [username, email, hashedPassword],
-    function (err) {
-      if (err) {
-        return res.status(400).json({ error: 'User already exists or invalid data' });
-      }
-      const token = jwt.sign({ id: this.lastID, username }, SECRET_KEY);
-      res.json({ token, user: { id: this.lastID, username, email, avatar: null, description: '', status: 'online' } });
-    }
-  );
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true });
 });
 
-// Auth: Login
-app.post('/api/login', (req, res) => {
-  const { email, password } = req.body;
-  db.get(`SELECT * FROM users WHERE email = ?`, [email], async (err, user) => {
-    if (err || !user) return res.status(400).json({ error: 'User not found' });
+app.post('/api/register', async (req, res) => {
+  try {
+    const { username, email, password } = req.body;
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: 'Username, email and password are required' });
+    }
+
+    const existingUser = await User.findOne({
+      $or: [{ email: email.toLowerCase() }, { username }]
+    }).lean();
+
+    if (existingUser) {
+      return res.status(400).json({ error: 'User already exists or invalid data' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = await User.create({
+      username,
+      email: email.toLowerCase(),
+      password: hashedPassword
+    });
+
+    res.json({
+      token: signToken(user),
+      user: toUserResponse(user)
+    });
+  } catch (error) {
+    console.error('Register error:', error);
+    res.status(500).json({ error: 'Error creating user' });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const user = await User.findOne({ email: (email || '').toLowerCase() });
+
+    if (!user) {
+      return res.status(400).json({ error: 'User not found' });
+    }
 
     const validPassword = await bcrypt.compare(password, user.password);
-    if (!validPassword) return res.status(400).json({ error: 'Invalid password' });
-
-    const token = jwt.sign({ id: user.id, username: user.username }, SECRET_KEY);
-    res.json({ token, user: { id: user.id, username: user.username, email: user.email, avatar: user.avatar, description: user.description, status: user.status } });
-  });
-});
-
-// Auth: Get Current User (Me)
-app.get('/api/auth/me', authenticateToken, (req, res) => {
-  db.get(`SELECT id, username, email, avatar, description, status FROM users WHERE id = ?`, [req.user.id], (err, user) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json({ user });
-  });
-});
-
-// User: Update Profile (Avatar, Username, Description, Status)
-app.put('/api/user/profile', authenticateToken, upload.single('avatar'), (req, res) => {
-  const { username, description, status } = req.body;
-  let avatarUrl = req.body.avatarUrl; // If not updating image
-
-  if (req.file) {
-    avatarUrl = `/uploads/${req.file.filename}`;
-  }
-
-  const userId = req.user.id;
-
-  // Update username, description, status, and avatar
-  // Using explicit values instead of COALESCE for username to ensure it updates if provided
-  const sql = `UPDATE users SET 
-    username = ?, 
-    description = ?, 
-    status = ?, 
-    avatar = COALESCE(?, avatar) 
-    WHERE id = ?`;
-
-  console.log(`[PROFILE_UPDATE] Attempting update for user ID: ${userId} with data:`, { username, description, status, avatarUrl });
-
-  db.run(sql, [username, description, status, avatarUrl, userId], function (err) {
-    if (err) {
-      console.error("[PROFILE_UPDATE] Database error:", err.message);
-      if (err.message.includes('UNIQUE constraint failed: users.username')) {
-        return res.status(400).json({ error: 'Este nombre de usuario ya está en uso.' });
-      }
-      return res.status(500).json({ error: 'Error al actualizar base de datos' });
+    if (!validPassword) {
+      return res.status(400).json({ error: 'Invalid password' });
     }
 
-    console.log(`[PROFILE_UPDATE] Success. Rows changed: ${this.changes}`);
+    res.json({
+      token: signToken(user),
+      user: toUserResponse(user)
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Error during login' });
+  }
+});
 
-    if (this.changes === 0) {
-      console.warn(`[PROFILE_UPDATE] Warning: No rows were updated for user ID: ${userId}`);
+app.get('/api/auth/me', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json({ user: toUserResponse(user) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/user/profile', authenticateToken, upload.single('avatar'), async (req, res) => {
+  try {
+    const { username, description, status } = req.body;
+    const avatarUrl = req.file ? `/uploads/${req.file.filename}` : req.body.avatarUrl;
+
+    const duplicateUsername = await User.findOne({
+      username,
+      _id: { $ne: req.user.id }
+    }).lean();
+
+    if (duplicateUsername) {
+      return res.status(400).json({ error: 'Este nombre de usuario ya está en uso.' });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      {
+        username,
+        description,
+        status,
+        ...(avatarUrl ? { avatar: avatarUrl } : {})
+      },
+      { new: true }
+    );
+
+    if (!user) {
       return res.status(404).json({ error: 'Usuario no encontrado para actualizar' });
     }
 
-    db.get(`SELECT id, username, email, avatar, description, status FROM users WHERE id = ?`, [userId], (err, user) => {
-      if (err) return res.status(500).json({ error: err.message });
-      console.log("[PROFILE_UPDATE] Returning refreshed user data:", user);
-
-      const newToken = jwt.sign({ id: user.id, username: user.username }, SECRET_KEY);
-      res.json({ user, token: newToken });
+    res.json({
+      user: toUserResponse(user),
+      token: signToken(user)
     });
+  } catch (error) {
+    console.error('Profile update error:', error);
+    res.status(500).json({ error: 'Error al actualizar base de datos' });
   }
-  );
 });
 
-// User: Get User by ID (Public Profile)
-app.get('/api/users/:id', authenticateToken, (req, res) => {
-  const { id } = req.params;
-  db.get(`SELECT id, username, email, avatar, description, status FROM users WHERE id = ?`, [id], (err, user) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!user) return res.status(404).json({ error: 'User not found' });
+app.get('/api/users/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ error: 'User not found' });
+    }
 
-    // Check friendship status
-    db.get(`SELECT status FROM friendships WHERE (requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?)`,
-      [req.user.id, id, id, req.user.id],
-      (err, friendship) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ ...user, friendshipStatus: friendship ? friendship.status : null });
-      }
+    const user = await User.findById(id).lean();
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const friendship = await findFriendshipBetween(req.user.id, id);
+    res.json({
+      ...toUserResponse(user),
+      friendshipStatus: friendship ? friendship.status : null
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/users/search', authenticateToken, async (req, res) => {
+  try {
+    const { email } = req.query;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const user = await User.findOne({
+      email: email.toLowerCase(),
+      _id: { $ne: req.user.id }
+    }).lean();
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json(toUserResponse(user));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/friends/request', authenticateToken, async (req, res) => {
+  try {
+    const { addresseeId } = req.body;
+    if (!isValidObjectId(addresseeId)) {
+      return res.status(400).json({ error: 'Invalid user' });
+    }
+
+    const row = await findFriendshipBetween(req.user.id, addresseeId);
+    if (row) {
+      if (row.status === 'blocked') return res.status(400).json({ error: 'Cannot send request' });
+      if (row.status === 'accepted') return res.status(400).json({ error: 'Already friends' });
+      if (row.status === 'pending') return res.status(400).json({ error: 'Request already pending' });
+    }
+
+    await Friendship.create({
+      requesterId: req.user.id,
+      addresseeId,
+      status: 'pending'
+    });
+
+    res.json({ message: 'Friend request sent' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/friends/requests', authenticateToken, async (req, res) => {
+  try {
+    const requests = await Friendship.find({
+      addresseeId: req.user.id,
+      status: 'pending'
+    }).populate('requesterId', 'username email avatar');
+
+    res.json(
+      requests.map(request => ({
+        id: request._id.toString(),
+        user_id: request.requesterId._id.toString(),
+        username: request.requesterId.username,
+        email: request.requesterId.email,
+        avatar: request.requesterId.avatar || null
+      }))
     );
-  });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
-// User: Get All Users (for finding friends) - MODIFIED: Search by email
-app.get('/api/users/search', authenticateToken, (req, res) => {
-  const { email } = req.query;
-  if (!email) return res.status(400).json({ error: 'Email is required' });
+app.put('/api/friends/respond', authenticateToken, async (req, res) => {
+  try {
+    const { friendshipId, action } = req.body;
+    if (!isValidObjectId(friendshipId)) {
+      return res.status(400).json({ error: 'Invalid request' });
+    }
 
-  db.get(`SELECT id, username, email, avatar, description, status FROM users WHERE email = ? AND id != ?`, [email, req.user.id], (err, user) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json(user);
-  });
-});
+    if (action === 'reject') {
+      await Friendship.deleteOne({ _id: friendshipId, addresseeId: req.user.id });
+      return res.json({ message: 'Request rejected' });
+    }
 
-// Friends: Send Request
-app.post('/api/friends/request', authenticateToken, (req, res) => {
-  const { addresseeId } = req.body;
-  const requesterId = req.user.id;
-
-  // Check if friendship already exists
-  db.get(`SELECT * FROM friendships WHERE (requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?)`,
-    [requesterId, addresseeId, addresseeId, requesterId],
-    (err, row) => {
-      if (err) return res.status(500).json({ error: err.message });
-      if (row) {
-        if (row.status === 'blocked') return res.status(400).json({ error: 'Cannot send request' });
-        if (row.status === 'accepted') return res.status(400).json({ error: 'Already friends' });
-        if (row.status === 'pending') return res.status(400).json({ error: 'Request already pending' });
-      }
-
-      db.run(`INSERT INTO friendships (requester_id, addressee_id, status) VALUES (?, ?, 'pending')`,
-        [requesterId, addresseeId],
-        function (err) {
-          if (err) return res.status(500).json({ error: err.message });
-          res.json({ message: 'Friend request sent' });
-        }
+    if (action === 'accept') {
+      await Friendship.updateOne(
+        { _id: friendshipId, addresseeId: req.user.id },
+        { $set: { status: 'accepted' } }
       );
+      return res.json({ message: 'Request accepted' });
     }
-  );
-});
 
-// Friends: Get Requests (Incoming)
-app.get('/api/friends/requests', authenticateToken, (req, res) => {
-  db.all(`
-    SELECT f.id, u.id as user_id, u.username, u.email, u.avatar 
-    FROM friendships f
-    JOIN users u ON f.requester_id = u.id
-    WHERE f.addressee_id = ? AND f.status = 'pending'
-  `, [req.user.id], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
-  });
-});
-
-// Friends: Respond to Request (Accept/Reject)
-app.put('/api/friends/respond', authenticateToken, (req, res) => {
-  const { friendshipId, action } = req.body; // action: 'accept' or 'reject'
-
-  if (action === 'reject') {
-    db.run(`DELETE FROM friendships WHERE id = ? AND addressee_id = ?`, [friendshipId, req.user.id], function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'Request rejected' });
-    });
-  } else if (action === 'accept') {
-    db.run(`UPDATE friendships SET status = 'accepted' WHERE id = ? AND addressee_id = ?`, [friendshipId, req.user.id], function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'Request accepted' });
-    });
-  } else {
     res.status(400).json({ error: 'Invalid action' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Friends: Get Friends List (Accepted)
-app.get('/api/friends', authenticateToken, (req, res) => {
-  const sql = `
-    SELECT u.id, u.username, u.email, u.avatar, u.description, u.status
-    FROM friendships f
-    JOIN users u ON (f.requester_id = u.id OR f.addressee_id = u.id)
-    WHERE (f.requester_id = ? OR f.addressee_id = ?) 
-    AND f.status = 'accepted'
-    AND u.id != ?
-  `;
-  db.all(sql, [req.user.id, req.user.id, req.user.id], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
-  });
+app.get('/api/friends', authenticateToken, async (req, res) => {
+  try {
+    const friendships = await Friendship.find({
+      status: 'accepted',
+      $or: [{ requesterId: req.user.id }, { addresseeId: req.user.id }]
+    }).lean();
+
+    const friendIds = friendships.map(friendship =>
+      friendship.requesterId.toString() === req.user.id
+        ? friendship.addresseeId
+        : friendship.requesterId
+    );
+
+    const friends = await User.find({ _id: { $in: friendIds } })
+      .select('username email avatar description status')
+      .lean();
+
+    res.json(friends.map(friend => toUserResponse(friend)));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
-// Friends: Block User
-app.post('/api/friends/block', authenticateToken, (req, res) => {
-  const { userId } = req.body;
-  const myId = req.user.id;
-
-  // Check if friendship exists to update, or insert new block
-  db.get(`SELECT id FROM friendships WHERE (requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?)`,
-    [myId, userId, userId, myId],
-    (err, row) => {
-      if (err) return res.status(500).json({ error: err.message });
-
-      if (row) {
-
-        db.run(`UPDATE friendships SET status = 'blocked', requester_id = ?, addressee_id = ? WHERE id = ?`,
-          [myId, userId, row.id], // Make me the requester of the block
-          (err) => {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ message: 'User blocked' });
-          }
-        );
-      } else {
-        db.run(`INSERT INTO friendships (requester_id, addressee_id, status) VALUES (?, ?, 'blocked')`,
-          [myId, userId],
-          (err) => {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ message: 'User blocked' });
-          }
-        );
-      }
+app.post('/api/friends/block', authenticateToken, async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!isValidObjectId(userId)) {
+      return res.status(400).json({ error: 'Invalid user' });
     }
-  );
-});
 
-// Rooms: Create Room
-app.post('/api/rooms', authenticateToken, upload.single('avatar'), (req, res) => {
-  const { name, type, password, description, max_members } = req.body;
-  let members = req.body.members;
-  let avatarUrl = null;
-
-  if (req.file) {
-    avatarUrl = `/uploads/${req.file.filename}`;
-  }
-
-  // Handle members if sent as JSON string (common with FormData)
-  if (typeof members === 'string') {
-    try {
-      members = JSON.parse(members);
-    } catch (e) {
-      members = [];
-    }
-  }
-
-  db.run(`INSERT INTO rooms (name, type, password, created_by, avatar, description, max_members) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [name, type, password || null, req.user.id, avatarUrl, description, max_members || 0],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      const roomId = this.lastID;
-
-      // Add creator
-      db.run(`INSERT INTO room_members (room_id, user_id) VALUES (?, ?)`, [roomId, req.user.id], (err) => {
-        if (err) console.error("Error adding creator to room:", err.message);
-
-        // Add other members
-        if (members && Array.isArray(members)) {
-          members.forEach(memberId => {
-            db.run(`INSERT INTO room_members (room_id, user_id) VALUES (?, ?)`, [roomId, memberId], (err) => {
-              if (err) console.error(`Error adding member ${memberId} to room:`, err.message);
-            });
-          });
-        }
-
-        // Send response AFTER adding the creator at least
-        res.json({ id: roomId, name, type, created_by: req.user.id, avatar: avatarUrl, description, max_members });
+    const existing = await findFriendshipBetween(req.user.id, userId);
+    if (existing) {
+      existing.requesterId = req.user.id;
+      existing.addresseeId = userId;
+      existing.status = 'blocked';
+      await existing.save();
+    } else {
+      await Friendship.create({
+        requesterId: req.user.id,
+        addresseeId: userId,
+        status: 'blocked'
       });
     }
-  );
-});
 
-// Rooms: Get Room Details & Members
-app.get('/api/rooms/:roomId/details', authenticateToken, (req, res) => {
-  const { roomId } = req.params;
-
-  db.get(`SELECT * FROM rooms WHERE id = ?`, [roomId], (err, room) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!room) return res.status(404).json({ error: 'Room not found' });
-
-    db.all(`
-            SELECT u.id, u.username, u.email, u.avatar, u.status 
-            FROM room_members rm
-            JOIN users u ON rm.user_id = u.id
-            WHERE rm.room_id = ?
-        `, [roomId], (err, members) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ ...room, members });
-    });
-  });
-});
-
-// Rooms: Add Member to Room
-app.post('/api/rooms/:roomId/members', authenticateToken, (req, res) => {
-  const { roomId } = req.params;
-  const { userId } = req.body;
-  const requesterId = req.user.id;
-
-  db.get(`SELECT * FROM rooms WHERE id = ?`, [roomId], (err, room) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!room) return res.status(404).json({ error: 'Room not found' });
-
-    // Check if requester is admin/creator (optional restriction, user asked for admin limit control)
-    // User said: "que el chat no tenga limites... a menos que el administrador... lo delimite"
-    // Implicitly, usually admins add people or people join. Let's allow adding if room is not full.
-
-    // Check current member count
-    db.get(`SELECT COUNT(*) as count FROM room_members WHERE room_id = ?`, [roomId], (err, row) => {
-      if (err) return res.status(500).json({ error: err.message });
-
-      if (room.max_members > 0 && row.count >= room.max_members) {
-        return res.status(400).json({ error: 'Room is full' });
-      }
-
-      // Check if already member
-      db.get(`SELECT * FROM room_members WHERE room_id = ? AND user_id = ?`, [roomId, userId], (err, member) => {
-        if (member) return res.status(400).json({ error: 'User already in room' });
-
-        db.run(`INSERT INTO room_members (room_id, user_id) VALUES (?, ?)`, [roomId, userId], (err) => {
-          if (err) return res.status(500).json({ error: err.message });
-          res.json({ message: 'Member added' });
-        });
-      });
-    });
-  });
-});
-
-// Rooms: Update Room Details
-app.put('/api/rooms/:roomId', authenticateToken, upload.single('avatar'), (req, res) => {
-  const { roomId } = req.params;
-  const { name, description } = req.body;
-  const userId = req.user.id;
-  let avatarUrl = req.body.avatarUrl; // If not updating image
-
-  if (req.file) {
-    avatarUrl = `/uploads/${req.file.filename}`;
+    res.json({ message: 'User blocked' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
+});
 
-  // Check if user is creator/admin
-  db.get(`SELECT * FROM rooms WHERE id = ?`, [roomId], (err, room) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!room) return res.status(404).json({ error: 'Room not found' });
+app.post('/api/rooms', authenticateToken, upload.single('avatar'), async (req, res) => {
+  try {
+    const { name, type, password, description, max_members } = req.body;
+    let members = req.body.members;
+    const avatarUrl = req.file ? `/uploads/${req.file.filename}` : null;
 
-    if (room.created_by !== userId) {
+    if (typeof members === 'string') {
+      try {
+        members = JSON.parse(members);
+      } catch (error) {
+        members = [];
+      }
+    }
+
+    const uniqueMembers = Array.from(
+      new Set([req.user.id, ...(Array.isArray(members) ? members : [])].filter(isValidObjectId))
+    );
+
+    const room = await Room.create({
+      name,
+      type,
+      password: password || null,
+      createdBy: req.user.id,
+      avatar: avatarUrl,
+      description: description || '',
+      maxMembers: Number(max_members || 0),
+      members: uniqueMembers
+    });
+
+    res.json(toRoomResponse(room));
+  } catch (error) {
+    console.error('Create room error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/rooms/:roomId/details', authenticateToken, async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    if (!isValidObjectId(roomId)) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+
+    const room = await Room.findById(roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+
+    res.json(await serializeRoomWithMembers(room));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/rooms/:roomId/members', authenticateToken, async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const { userId } = req.body;
+
+    if (!isValidObjectId(roomId) || !isValidObjectId(userId)) {
+      return res.status(400).json({ error: 'Invalid room or user' });
+    }
+
+    const room = await Room.findById(roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+
+    if (room.maxMembers > 0 && room.members.length >= room.maxMembers) {
+      return res.status(400).json({ error: 'Room is full' });
+    }
+
+    const alreadyMember = room.members.some(memberId => memberId.toString() === userId);
+    if (alreadyMember) {
+      return res.status(400).json({ error: 'User already in room' });
+    }
+
+    room.members.push(userId);
+    await room.save();
+    res.json({ message: 'Member added' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/rooms/:roomId', authenticateToken, upload.single('avatar'), async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const { name, description } = req.body;
+    const avatarUrl = req.file ? `/uploads/${req.file.filename}` : req.body.avatarUrl;
+
+    if (!isValidObjectId(roomId)) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+
+    const room = await Room.findById(roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+
+    if (room.createdBy.toString() !== req.user.id) {
       return res.status(403).json({ error: 'Only admin can update room details' });
     }
 
-    db.run(`UPDATE rooms SET name = ?, description = ?, avatar = COALESCE(?, avatar) WHERE id = ?`,
-      [name, description, avatarUrl, roomId],
-      function (err) {
-        if (err) return res.status(500).json({ error: err.message });
-
-        // Emit event to all users in the room
-        io.to(roomId).emit('room_updated', {
-          id: parseInt(roomId),
-          name,
-          description,
-          avatar: avatarUrl
-        });
-
-        res.json({ message: 'Room updated successfully', avatar: avatarUrl });
-      }
-    );
-  });
-});
-
-// Rooms: Delete or Leave Room
-app.delete('/api/rooms/:roomId', authenticateToken, (req, res) => {
-  const { roomId } = req.params;
-  const userId = req.user.id;
-
-  db.get(`SELECT * FROM rooms WHERE id = ?`, [roomId], (err, room) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!room) return res.status(404).json({ error: 'Room not found' });
-
-    if (room.created_by === userId) {
-      // User is creator: Delete everything
-      db.serialize(() => {
-        db.run(`DELETE FROM messages WHERE room_id = ?`, [roomId]);
-        db.run(`DELETE FROM room_members WHERE room_id = ?`, [roomId]);
-        db.run(`DELETE FROM rooms WHERE id = ?`, [roomId], (err) => {
-          if (err) return res.status(500).json({ error: err.message });
-          res.json({ message: 'Room deleted successfully' });
-        });
-      });
-    } else {
-      // User is just a member: Leave the room
-      db.run(`DELETE FROM room_members WHERE room_id = ? AND user_id = ?`, [roomId, userId], (err) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ message: 'Left the room successfully' });
-      });
+    room.name = name;
+    room.description = description || '';
+    if (avatarUrl) {
+      room.avatar = avatarUrl;
     }
-  });
+    await room.save();
+
+    const roomPayload = {
+      id: room._id.toString(),
+      name: room.name,
+      description: room.description,
+      avatar: room.avatar || null
+    };
+
+    io.to(roomId).emit('room_updated', roomPayload);
+    res.json({ message: 'Room updated successfully', avatar: room.avatar || null });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
-// Rooms: Get My Rooms
-app.get('/api/rooms', authenticateToken, (req, res) => {
-  const sql = `
-    SELECT r.* FROM rooms r
-    JOIN room_members rm ON r.id = rm.room_id
-    WHERE rm.user_id = ?
-  `;
-  db.all(sql, [req.user.id], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
-  });
+app.delete('/api/rooms/:roomId', authenticateToken, async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    if (!isValidObjectId(roomId)) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+
+    const room = await Room.findById(roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+
+    if (room.createdBy.toString() === req.user.id) {
+      await Message.deleteMany({ roomId });
+      await Room.deleteOne({ _id: roomId });
+      return res.json({ message: 'Room deleted successfully' });
+    }
+
+    room.members = room.members.filter(memberId => memberId.toString() !== req.user.id);
+    await room.save();
+    res.json({ message: 'Left the room successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
-// Messages: Get Messages for Room
-app.get('/api/messages/:roomId', authenticateToken, (req, res) => {
-  const { roomId } = req.params;
-  const { password } = req.query;
+app.get('/api/rooms', authenticateToken, async (req, res) => {
+  try {
+    const rooms = await Room.find({ members: req.user.id }).sort({ name: 1 });
+    res.json(rooms.map(room => toRoomResponse(room)));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
-  // Check room password if exists
-  db.get(`SELECT password FROM rooms WHERE id = ?`, [roomId], (err, room) => {
-    if (err || !room) return res.status(404).json({ error: "Room not found" });
+app.get('/api/messages/:roomId', authenticateToken, async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const { password } = req.query;
+
+    if (!isValidObjectId(roomId)) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+
+    const room = await Room.findById(roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
 
     if (room.password && room.password !== password) {
-      return res.status(403).json({ error: "Incorrect password" });
+      return res.status(403).json({ error: 'Incorrect password' });
     }
 
-    db.all(`
-            SELECT m.*, u.username, u.avatar 
-            FROM messages m 
-            JOIN users u ON m.sender_id = u.id 
-            LEFT JOIN hidden_messages hm ON m.id = hm.message_id AND hm.user_id = ?
-            WHERE m.room_id = ? AND hm.message_id IS NULL
-            ORDER BY m.created_at ASC`,
-      [req.user.id, roomId],
-      (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
+    const messages = await Message.find({
+      roomId,
+      hiddenFor: { $ne: req.user.id }
+    })
+      .sort({ createdAt: 1 })
+      .populate('senderId', 'username avatar');
 
-        const messageIds = rows.map(r => r.id);
-        if (messageIds.length === 0) {
-          return res.json(rows);
-        }
-
-        const placeholders = messageIds.map(() => '?').join(',');
-        db.all(
-          `SELECT message_id, user_id, emoji FROM message_reactions WHERE message_id IN (${placeholders})`,
-          messageIds,
-          (err2, reactionRows) => {
-            if (err2) return res.status(500).json({ error: err2.message });
-
-            const reactionMap = {};
-            reactionRows.forEach(r => {
-              if (!reactionMap[r.message_id]) reactionMap[r.message_id] = [];
-              reactionMap[r.message_id].push({ user_id: r.user_id, emoji: r.emoji });
-            });
-
-            const enriched = rows.map(m => ({
-              ...m,
-              reactions: reactionMap[m.id] || []
-            }));
-
-            res.json(enriched);
-          }
-        );
-      }
-    );
-  });
+    res.json(messages.map(message => toMessageResponse(message)));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
-// File Upload Endpoint
 app.post('/api/upload', authenticateToken, upload.single('file'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
   const fileUrl = `/uploads/${req.file.filename}`;
   res.json({ fileUrl, type: req.file.mimetype });
 });
 
-// AI Chat Endpoint
 app.post('/api/ai/chat', async (req, res) => {
   const { message } = req.body;
   if (!message || typeof message !== 'string') {
@@ -601,7 +704,6 @@ app.post('/api/ai/chat', async (req, res) => {
   }
 });
 
-// AI Image Generation Endpoint
 app.post('/api/ai/image', async (req, res) => {
   const { prompt } = req.body;
   if (!prompt || typeof prompt !== 'string') {
@@ -621,10 +723,9 @@ app.post('/api/ai/image', async (req, res) => {
     });
   }
   try {
-    const modelId = '@cf/stabilityai/stable-diffusion-xl-base-1.0';
     const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
       CF_ACCOUNT_ID
-    )}/ai/run/${modelId}`;
+    )}/ai/run/${encodeURIComponent(CF_IMAGE_MODEL)}`;
 
     const response = await fetch(url, {
       method: 'POST',
@@ -632,29 +733,25 @@ app.post('/api/ai/image', async (req, res) => {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${CF_AI_API_TOKEN}`
       },
-      body: JSON.stringify({
-        prompt
-      })
+      body: JSON.stringify({ prompt })
     });
 
     let imageUrl = null;
     let errorText = null;
-
     const contentType = response.headers.get('content-type') || '';
 
     if (!response.ok) {
       let errText = '';
       try {
         if (contentType.includes('application/json')) {
-          const errJson = await response.json();
-          errText = JSON.stringify(errJson);
+          errText = JSON.stringify(await response.json());
         } else {
           errText = await response.text();
         }
-      } catch (e) {
+      } catch (error) {
         errText = response.statusText || 'Error desconocido de Cloudflare Workers AI.';
       }
-      console.error('Cloudflare Workers AI error (status ' + response.status + '):', errText);
+      console.error(`Cloudflare Workers AI error (status ${response.status}):`, errText);
       errorText = 'Cloudflare Workers AI devolvió un error al generar la imagen.';
     } else if (contentType.includes('application/json')) {
       const data = await response.json();
@@ -667,9 +764,9 @@ app.post('/api/ai/image', async (req, res) => {
       }
     } else {
       const arrayBuffer = await response.arrayBuffer();
-      const base64 = Buffer.from(arrayBuffer).toString('base64');
-      imageUrl = `data:image/png;base64,${base64}`;
+      imageUrl = `data:image/png;base64,${Buffer.from(arrayBuffer).toString('base64')}`;
     }
+
     if (!imageUrl) {
       return res.json({
         imageUrl: null,
@@ -678,6 +775,7 @@ app.post('/api/ai/image', async (req, res) => {
           'No se pudo generar la imagen con Cloudflare Workers AI (no se recibió ninguna imagen).'
       });
     }
+
     res.json({ imageUrl });
   } catch (err) {
     console.error('Error en /api/ai/image', err);
@@ -688,10 +786,7 @@ app.post('/api/ai/image', async (req, res) => {
   }
 });
 
-
-// --- Socket.io ---
-
-io.on('connection', (socket) => {
+io.on('connection', socket => {
   console.log('A user connected:', socket.id);
 
   socket.on('register_user', ({ userId }) => {
@@ -705,115 +800,125 @@ io.on('connection', (socket) => {
     console.log(`User ${socket.id} joined room ${roomId}`);
   });
 
-  socket.on('send_message', (data) => {
-    // data: { roomId, senderId, content, type, fileUrl }
-    const { roomId, senderId, content, type, fileUrl } = data;
-
-    db.run(`INSERT INTO messages (room_id, sender_id, content, type, file_url) VALUES (?, ?, ?, ?, ?)`,
-      [roomId, senderId, content, type, fileUrl],
-      function (err) {
-        if (err) return console.error(err);
-
-        // Fetch sender info to broadcast back
-        db.get(`SELECT username, avatar FROM users WHERE id = ?`, [senderId], (err, user) => {
-          const messageData = {
-            id: this.lastID,
-            room_id: roomId,
-            sender_id: senderId,
-            content,
-            type,
-            file_url: fileUrl,
-            created_at: new Date(), // approximate
-            username: user.username,
-            avatar: user.avatar,
-            is_deleted: 0
-          };
-          io.to(roomId).emit('receive_message', messageData);
-        });
+  socket.on('send_message', async data => {
+    try {
+      const { roomId, senderId, content, type, fileUrl } = data;
+      if (!isValidObjectId(roomId) || !isValidObjectId(senderId)) {
+        return;
       }
-    );
+
+      const message = await Message.create({
+        roomId,
+        senderId,
+        content,
+        type,
+        fileUrl: fileUrl || null
+      });
+      const sender = await User.findById(senderId).select('username avatar');
+      io.to(roomId).emit('receive_message', toMessageResponse(message, sender));
+    } catch (error) {
+      console.error('Error sending message:', error);
+    }
   });
 
-  socket.on('delete_message', ({ messageId, roomId }) => {
-    db.get(`SELECT is_deleted FROM messages WHERE id = ?`, [messageId], (err, row) => {
-      if (err || !row) return;
+  socket.on('delete_message', async ({ messageId, roomId }) => {
+    try {
+      if (!isValidObjectId(messageId)) {
+        return;
+      }
 
-      if (row.is_deleted) {
-        // Hard delete if already soft deleted
-        db.run(`DELETE FROM messages WHERE id = ?`, [messageId], function (err) {
-          if (err) {
-            console.error("Error deleting message", err);
-            return;
-          }
-          io.to(roomId).emit('message_gone', messageId);
-        });
+      const message = await Message.findById(messageId);
+      if (!message) {
+        return;
+      }
+
+      if (message.isDeleted) {
+        await Message.deleteOne({ _id: messageId });
+        io.to(roomId).emit('message_gone', messageId);
       } else {
-        // Soft delete
-        db.run(`UPDATE messages SET is_deleted = 1 WHERE id = ?`, [messageId], function (err) {
-          if (err) {
-            console.error("Error soft deleting message", err);
-            return;
-          }
-          io.to(roomId).emit('message_deleted', messageId);
-        });
+        message.isDeleted = true;
+        await message.save();
+        io.to(roomId).emit('message_deleted', messageId);
       }
-    });
+    } catch (error) {
+      console.error('Error deleting message', error);
+    }
   });
 
-  socket.on('hide_message', ({ messageId, userId }) => {
-    db.run(`INSERT OR IGNORE INTO hidden_messages (user_id, message_id) VALUES (?, ?)`, [userId, messageId], (err) => {
-      if (err) console.error("Error hiding message", err);
-      // Only emit to the specific user's socket (or let client handle optimistic update)
-      // We don't broadcast this
-    });
+  socket.on('hide_message', async ({ messageId, userId }) => {
+    try {
+      if (!isValidObjectId(messageId) || !isValidObjectId(userId)) {
+        return;
+      }
+      await Message.updateOne(
+        { _id: messageId },
+        { $addToSet: { hiddenFor: userId } }
+      );
+    } catch (error) {
+      console.error('Error hiding message', error);
+    }
   });
 
-  socket.on('add_reaction', ({ messageId, userId, emoji, roomId }) => {
-    db.run(
-      `INSERT OR IGNORE INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?)`,
-      [messageId, userId, emoji],
-      err => {
-        if (err) {
-          console.error("Error adding reaction", err);
-          return;
-        }
-        db.all(
-          `SELECT message_id, user_id, emoji FROM message_reactions WHERE message_id = ?`,
-          [messageId],
-          (err2, rows) => {
-            if (err2) {
-              console.error("Error loading reactions", err2);
-              return;
-            }
-            io.to(roomId).emit('reaction_updated', { messageId, reactions: rows });
-          }
-        );
+  socket.on('add_reaction', async ({ messageId, userId, emoji, roomId }) => {
+    try {
+      if (!isValidObjectId(messageId) || !isValidObjectId(userId) || !emoji) {
+        return;
       }
-    );
+
+      const message = await Message.findById(messageId);
+      if (!message) {
+        return;
+      }
+
+      const alreadyExists = message.reactions.some(
+        reaction =>
+          reaction.userId.toString() === userId && reaction.emoji === emoji
+      );
+
+      if (!alreadyExists) {
+        message.reactions.push({ userId, emoji });
+        await message.save();
+      }
+
+      io.to(roomId).emit('reaction_updated', {
+        messageId,
+        reactions: message.reactions.map(reaction => ({
+          user_id: reaction.userId.toString(),
+          emoji: reaction.emoji
+        }))
+      });
+    } catch (error) {
+      console.error('Error adding reaction', error);
+    }
   });
 
-  socket.on('remove_reaction', ({ messageId, userId, emoji, roomId }) => {
-    db.run(
-      `DELETE FROM message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?`,
-      [messageId, userId, emoji],
-      err => {
-        if (err) {
-          console.error("Error removing reaction", err);
-          return;
-        }
-        db.all(
-          `SELECT message_id, user_id, emoji FROM message_reactions WHERE message_id = ?`,
-          [messageId],
-          (err2, rows) => {
-            if (err2) {
-              console.error("Error loading reactions", err2);
-              return;
-            }
-            io.to(roomId).emit('reaction_updated', { messageId, reactions: rows });
-          }
-        );
+  socket.on('remove_reaction', async ({ messageId, userId, emoji, roomId }) => {
+    try {
+      if (!isValidObjectId(messageId) || !isValidObjectId(userId) || !emoji) {
+        return;
       }
-    );
+
+      const message = await Message.findById(messageId);
+      if (!message) {
+        return;
+      }
+
+      message.reactions = message.reactions.filter(
+        reaction =>
+          !(reaction.userId.toString() === userId && reaction.emoji === emoji)
+      );
+      await message.save();
+
+      io.to(roomId).emit('reaction_updated', {
+        messageId,
+        reactions: message.reactions.map(reaction => ({
+          user_id: reaction.userId.toString(),
+          emoji: reaction.emoji
+        }))
+      });
+    } catch (error) {
+      console.error('Error removing reaction', error);
+    }
   });
 
   socket.on('call_user', ({ fromUserId, toUserId, roomId, isVideo }) => {
@@ -864,6 +969,13 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+connectDB()
+  .then(() => {
+    server.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  })
+  .catch(error => {
+    console.error('Failed to connect to MongoDB Atlas:', error);
+    process.exit(1);
+  });

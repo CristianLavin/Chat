@@ -2,6 +2,7 @@ import { useState, useEffect, useContext } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import { X } from 'lucide-react';
+import { resolveMediaUrl } from '../lib/config';
 
 export default function CreateRoomModal({ onClose, onCreated }) {
   const { token } = useContext(AuthContext);
@@ -16,7 +17,7 @@ export default function CreateRoomModal({ onClose, onCreated }) {
 
   useEffect(() => {
     // Fetch FRIENDS instead of all users
-    axios.get('http://localhost:3000/api/friends').then(res => {
+    axios.get('/api/friends').then(res => {
       setUsers(res.data);
     });
   }, []);
@@ -35,7 +36,7 @@ export default function CreateRoomModal({ onClose, onCreated }) {
     formData.append('members', JSON.stringify(selectedUsers));
 
     try {
-      const res = await axios.post('http://localhost:3000/api/rooms', formData, {
+      const res = await axios.post('/api/rooms', formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
       });
       onCreated(res.data);
@@ -132,7 +133,7 @@ export default function CreateRoomModal({ onClose, onCreated }) {
                   }`}
                 >
                   <div className="w-8 h-8 rounded-full bg-gray-300 overflow-hidden">
-                     {u.avatar ? <img src={`http://localhost:3000${u.avatar}`} className="w-full h-full object-cover"/> : null}
+                     {u.avatar ? <img src={resolveMediaUrl(u.avatar)} className="w-full h-full object-cover"/> : null}
                   </div>
                   <span>{u.username}</span>
                 </div>

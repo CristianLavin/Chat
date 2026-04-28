@@ -33,7 +33,7 @@ export const AuthProvider = ({ children }) => {
       
       // Fetch user if not already set (e.g. on refresh)
       if (!user) {
-          axios.get('http://localhost:3000/api/auth/me')
+          axios.get('/api/auth/me')
             .then(res => {
                 setUser(res.data.user);
                 setLoading(false);
@@ -59,7 +59,7 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     try {
-      const res = await axios.post('http://localhost:3000/api/login', { email, password });
+      const res = await axios.post('/api/login', { email, password });
       const newToken = res.data.token;
       axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
       setToken(newToken);
@@ -72,7 +72,7 @@ export const AuthProvider = ({ children }) => {
 
   const register = async (username, email, password) => {
     try {
-      const res = await axios.post('http://localhost:3000/api/register', { username, email, password });
+      const res = await axios.post('/api/register', { username, email, password });
       const newToken = res.data.token;
       axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
       setToken(newToken);

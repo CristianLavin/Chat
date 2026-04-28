@@ -3,6 +3,7 @@ import { useContext, useState } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import AddFriendModal from './AddFriendModal';
 import FriendRequestsModal from './FriendRequestsModal';
+import { resolveMediaUrl } from '../lib/config';
 
 export default function Sidebar({ user, rooms, currentRoom, onSelectRoom, onOpenCreateRoom, onOpenProfile, onOpenAIChat }) {
   const { logout } = useContext(AuthContext);
@@ -16,7 +17,7 @@ export default function Sidebar({ user, rooms, currentRoom, onSelectRoom, onOpen
         <div className="flex items-center space-x-3 cursor-pointer" onClick={onOpenProfile}>
           <div className="w-10 h-10 rounded-full bg-gray-300 overflow-hidden">
             {user?.avatar ? (
-              <img src={`http://localhost:3000${user.avatar}`} alt="Avatar" className="w-full h-full object-cover" />
+              <img src={resolveMediaUrl(user.avatar)} alt="Avatar" className="w-full h-full object-cover" />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-gray-500">
                 <User size={20} />
@@ -78,7 +79,7 @@ export default function Sidebar({ user, rooms, currentRoom, onSelectRoom, onOpen
             >
               <div className="w-10 h-10 rounded-full bg-blue-200 flex-shrink-0 overflow-hidden flex items-center justify-center text-blue-700 font-bold">
                 {room.avatar ? (
-                  <img src={`http://localhost:3000${room.avatar}`} alt="Room" className="w-full h-full object-cover" />
+                  <img src={resolveMediaUrl(room.avatar)} alt="Room" className="w-full h-full object-cover" />
                 ) : (
                   room.name.charAt(0).toUpperCase()
                 )}

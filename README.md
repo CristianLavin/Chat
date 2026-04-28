@@ -52,21 +52,21 @@ Aplicacion de chat en tiempo real con frontend en React + Vite y backend en Expr
 - Node.js
 - Express
 - Socket.IO
-- SQLite
+- MongoDB Atlas
 - Multer
 - JWT
 - bcryptjs
 - dotenv
-- Google Generative AI SDK
+- Mongoose
 
 ## Arquitectura
 
 El proyecto esta dividido en dos partes:
 
 - `client/`: interfaz web del chat.
-- `server/`: API REST, sockets, persistencia en SQLite y logica de IA.
+- `server/`: API REST, sockets, persistencia en MongoDB Atlas y logica de IA.
 
-La base de datos se crea automaticamente en `server/chat.db`.
+La persistencia usa colecciones en MongoDB Atlas a traves de Mongoose.
 
 ## Funcionalidades principales
 
@@ -107,18 +107,38 @@ La base de datos se crea automaticamente en `server/chat.db`.
 
 ## Variables de entorno
 
-Crea un archivo `.env` en la raiz del proyecto con valores como estos:
+### Backend (`server/.env`)
+
+Puedes copiar `server/.env.example` y completarlo:
 
 ```env
-GEMINI_API_KEY=tu_clave_de_gemini
+PORT=3000
+MONGODB_URI=mongodb+srv://usuario:password@cluster.mongodb.net/chat-app?retryWrites=true&w=majority
+SECRET_KEY=cambia-esta-clave-en-produccion
+CLIENT_URL=http://localhost:5173,https://tu-frontend.vercel.app
+
+GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.5-flash
 
-CF_ACCOUNT_ID=tu_account_id_de_cloudflare
-CF_AI_API_TOKEN=tu_token_de_cloudflare
+CF_ACCOUNT_ID=
+CF_AI_API_TOKEN=
+CF_IMAGE_MODEL=@cf/stabilityai/stable-diffusion-xl-base-1.0
+```
+
+### Frontend (`client/.env`)
+
+Puedes copiar `client/.env.example`:
+
+```env
+VITE_API_URL=http://localhost:3000
+VITE_SOCKET_URL=http://localhost:3000
 ```
 
 Notas:
 
+- `MONGODB_URI` apunta a tu cluster de MongoDB Atlas.
+- `CLIENT_URL` controla los origenes permitidos por CORS y Socket.IO.
+- `VITE_API_URL` y `VITE_SOCKET_URL` permiten que Vercel apunte al backend desplegado en Render.
 - `GEMINI_API_KEY` se usa para el chat con IA.
 - `CF_ACCOUNT_ID` y `CF_AI_API_TOKEN` se usan para generar imagenes con Cloudflare Workers AI.
 
@@ -145,7 +165,7 @@ npm install
 Desde `server/`:
 
 ```bash
-node server.js
+npm start
 ```
 
 El backend corre por defecto en:
@@ -168,6 +188,37 @@ El frontend corre normalmente en:
 http://localhost:5173
 ```
 
+## Despliegue
+
+### Backend en Render
+
+- El repositorio incluye `render.yaml` con la configuracion base del servicio.
+- Crea un Web Service en Render apuntando a este repositorio o usa Blueprint deploy.
+- Render debe usar `server/` como `rootDir`.
+- Configura en Render las variables:
+  - `MONGODB_URI`
+  - `SECRET_KEY`
+  - `CLIENT_URL`
+  - `GEMINI_API_KEY` si quieres IA de texto
+  - `CF_ACCOUNT_ID` y `CF_AI_API_TOKEN` si quieres IA de imagen
+- El healthcheck queda disponible en `GET /api/health`.
+- Las subidas de archivos siguen usando disco local con `multer`, asi que en Render los archivos pueden perderse tras reinicios o redeploys. Para persistencia real en produccion conviene mover `uploads` a Cloudinary, S3 o similar.
+
+### Frontend en Vercel
+
+- Despliega la carpeta `client/` como proyecto de Vercel.
+- El archivo `client/vercel.json` deja la SPA lista para recargar rutas.
+- Configura estas variables en Vercel:
+  - `VITE_API_URL=https://tu-backend.onrender.com`
+  - `VITE_SOCKET_URL=https://tu-backend.onrender.com`
+
+### MongoDB Atlas
+
+- Crea un cluster en MongoDB Atlas.
+- Crea un usuario de base de datos y habilita acceso de red para Render.
+- Copia el connection string y usalo como valor de `MONGODB_URI`.
+- La app crea automaticamente las colecciones necesarias al iniciar.
+
 ## Estructura del proyecto
 
 ```text
@@ -178,11 +229,15 @@ Chat/
 │  │  ├─ context/
 │  │  ├─ App.jsx
 │  │  └─ main.jsx
+│  ├─ .env.example
+│  ├─ vercel.json
 │  └─ package.json
 ├─ server/
+│  ├─ .env.example
 │  ├─ db.js
 │  ├─ server.js
 │  └─ package.json
+├─ render.yaml
 └─ README.md
 ```
 

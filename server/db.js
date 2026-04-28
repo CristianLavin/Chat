@@ -1,117 +1,109 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
+const mongoose = require('mongoose');
 
-const dbPath = path.resolve(__dirname, 'chat.db');
+const { Schema } = mongoose;
 
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Error opening database', err);
-  } else {
-    console.log('Connected to the SQLite database.');
-    initDb();
+const MONGODB_URI = process.env.MONGODB_URI || '';
+
+let connectionPromise = null;
+
+const userSchema = new Schema(
+  {
+    username: { type: String, required: true, trim: true, unique: true },
+    email: { type: String, required: true, trim: true, lowercase: true, unique: true },
+    password: { type: String, required: true },
+    avatar: { type: String, default: null },
+    description: { type: String, default: '' },
+    status: { type: String, default: 'online' }
+  },
+  { versionKey: false }
+);
+
+const friendshipSchema = new Schema(
+  {
+    requesterId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    addresseeId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    status: {
+      type: String,
+      enum: ['pending', 'accepted', 'blocked'],
+      default: 'pending'
+    }
+  },
+  { timestamps: { createdAt: 'createdAt', updatedAt: false }, versionKey: false }
+);
+
+const roomSchema = new Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    type: { type: String, default: 'group' },
+    password: { type: String, default: null },
+    createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    avatar: { type: String, default: null },
+    description: { type: String, default: '' },
+    maxMembers: { type: Number, default: 0 },
+    members: [{ type: Schema.Types.ObjectId, ref: 'User' }]
+  },
+  { versionKey: false }
+);
+
+const reactionSchema = new Schema(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    emoji: { type: String, required: true }
+  },
+  { _id: false }
+);
+
+const messageSchema = new Schema(
+  {
+    roomId: { type: Schema.Types.ObjectId, ref: 'Room', required: true },
+    senderId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    content: { type: String, default: '' },
+    type: { type: String, default: 'text' },
+    fileUrl: { type: String, default: null },
+    isDeleted: { type: Boolean, default: false },
+    hiddenFor: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    reactions: [reactionSchema],
+    createdAt: { type: Date, default: Date.now }
+  },
+  { versionKey: false }
+);
+
+const User = mongoose.models.User || mongoose.model('User', userSchema);
+const Friendship =
+  mongoose.models.Friendship || mongoose.model('Friendship', friendshipSchema);
+const Room = mongoose.models.Room || mongoose.model('Room', roomSchema);
+const Message = mongoose.models.Message || mongoose.model('Message', messageSchema);
+
+async function connectDB() {
+  if (!MONGODB_URI) {
+    throw new Error('Falta la variable MONGODB_URI para conectar con MongoDB Atlas.');
   }
-});
 
-function initDb() {
-  db.serialize(() => {
-    // Users table
-    db.run(`CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT NOT NULL, -- ELIMINADO UNIQUE temporalmente para depuración si es necesario, pero mejor mantener integridad
-      email TEXT UNIQUE NOT NULL,
-      password TEXT NOT NULL,
-      avatar TEXT,
-      description TEXT,
-      status TEXT DEFAULT 'online'
-    )`, (err) => {
-      if (!err) {
-        // Asegurarse de que el username no sea UNIQUE si está dando problemas de migración, 
-        // pero lo ideal es que lo sea. Vamos a verificar si existe la restricción.
-      }
-    });
+  if (mongoose.connection.readyState === 1) {
+    return mongoose.connection;
+  }
 
-    // Rooms table
-    db.run(`CREATE TABLE IF NOT EXISTS rooms (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT,
-      type TEXT DEFAULT 'group', -- 'group' or 'direct'
-      password TEXT, -- For encrypted/locked rooms
-      created_by INTEGER,
-      avatar TEXT,
-      description TEXT,
-      max_members INTEGER DEFAULT 0, -- 0 means unlimited
-      FOREIGN KEY(created_by) REFERENCES users(id)
-    )`);
+  if (!connectionPromise) {
+    connectionPromise = mongoose
+      .connect(MONGODB_URI)
+      .then(conn => {
+        console.log('Connected to MongoDB Atlas.');
+        return conn;
+      })
+      .catch(err => {
+        connectionPromise = null;
+        throw err;
+      });
+  }
 
-    // Check columns for existing table (simple migration for dev)
-    db.all("PRAGMA table_info(rooms)", (err, rows) => {
-        if (err) console.error(err);
-        const columns = rows.map(r => r.name);
-        if (!columns.includes('avatar')) db.run("ALTER TABLE rooms ADD COLUMN avatar TEXT");
-        if (!columns.includes('description')) db.run("ALTER TABLE rooms ADD COLUMN description TEXT");
-        if (!columns.includes('max_members')) db.run("ALTER TABLE rooms ADD COLUMN max_members INTEGER DEFAULT 0");
-    });
-
-    // Room members
-    db.run(`CREATE TABLE IF NOT EXISTS room_members (
-      room_id INTEGER,
-      user_id INTEGER,
-      PRIMARY KEY (room_id, user_id),
-      FOREIGN KEY(room_id) REFERENCES rooms(id),
-      FOREIGN KEY(user_id) REFERENCES users(id)
-    )`);
-
-    // Messages table
-    db.run(`CREATE TABLE IF NOT EXISTS messages (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      room_id INTEGER,
-      sender_id INTEGER,
-      content TEXT, -- For text messages or file descriptions
-      type TEXT DEFAULT 'text', -- text, image, video, audio, file, sticker, gif
-      file_url TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      is_deleted BOOLEAN DEFAULT 0,
-      FOREIGN KEY(room_id) REFERENCES rooms(id),
-      FOREIGN KEY(sender_id) REFERENCES users(id)
-    )`);
-
-    // Check columns for existing table (simple migration for dev)
-    db.all("PRAGMA table_info(messages)", (err, rows) => {
-        if (err) console.error(err);
-        const columns = rows.map(r => r.name);
-        if (!columns.includes('is_deleted')) db.run("ALTER TABLE messages ADD COLUMN is_deleted BOOLEAN DEFAULT 0");
-    });
-
-    // Friendships table
-    db.run(`CREATE TABLE IF NOT EXISTS friendships (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      requester_id INTEGER,
-      addressee_id INTEGER,
-      status TEXT DEFAULT 'pending', -- pending, accepted, blocked
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(requester_id) REFERENCES users(id),
-      FOREIGN KEY(addressee_id) REFERENCES users(id),
-      UNIQUE(requester_id, addressee_id)
-    )`);
-
-    // Hidden messages table (Delete for me)
-    db.run(`CREATE TABLE IF NOT EXISTS hidden_messages (
-      user_id INTEGER,
-      message_id INTEGER,
-      PRIMARY KEY (user_id, message_id),
-      FOREIGN KEY(user_id) REFERENCES users(id),
-      FOREIGN KEY(message_id) REFERENCES messages(id)
-    )`);
-
-    db.run(`CREATE TABLE IF NOT EXISTS message_reactions (
-      message_id INTEGER,
-      user_id INTEGER,
-      emoji TEXT,
-      PRIMARY KEY (message_id, user_id, emoji),
-      FOREIGN KEY(message_id) REFERENCES messages(id),
-      FOREIGN KEY(user_id) REFERENCES users(id)
-    )`);
-  });
+  return connectionPromise;
 }
 
-module.exports = db;
+module.exports = {
+  connectDB,
+  mongoose,
+  User,
+  Friendship,
+  Room,
+  Message
+};
