@@ -275,6 +275,27 @@ app.put('/api/user/profile', authenticateToken, upload.single('avatar'), async (
     res.status(500).json({ error: 'Error al actualizar base de datos' });
   }
 });
+app.get('/api/users/search', authenticateToken, async (req, res) => {
+  try {
+    const { email } = req.query;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const user = await User.findOne({
+      email: email.toLowerCase(),
+      _id: { $ne: req.user.id }
+    }).lean();
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json(toUserResponse(user));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 app.get('/api/users/:id', authenticateToken, async (req, res) => {
   try {
@@ -293,28 +314,6 @@ app.get('/api/users/:id', authenticateToken, async (req, res) => {
       ...toUserResponse(user),
       friendshipStatus: friendship ? friendship.status : null
     });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/api/users/search', authenticateToken, async (req, res) => {
-  try {
-    const { email } = req.query;
-    if (!email) {
-      return res.status(400).json({ error: 'Email is required' });
-    }
-
-    const user = await User.findOne({
-      email: email.toLowerCase(),
-      _id: { $ne: req.user.id }
-    }).lean();
-
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    res.json(toUserResponse(user));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
