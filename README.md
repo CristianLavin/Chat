@@ -1,282 +1,94 @@
-# Chat App
+# Chat App 🚀
 
-Aplicacion de chat en tiempo real con frontend en React + Vite y backend en Express + Socket.IO, con autenticacion, salas, archivos, llamadas y funciones de IA.
+Aplicación de chat Full Stack en tiempo real con inteligencia artificial integrada. Desplegada y operativa en producción.
 
-## Caracteristicas
+🔗 Demo en vivo: [https://chat.cristian-lavin.dev](https://chat.cristian-lavin.dev)
 
-- Autenticacion de usuarios con registro, login y sesion protegida mediante JWT.
-- Perfil de usuario editable con avatar, descripcion y estado.
-- Chat en tiempo real con `Socket.IO`.
-- Salas grupales con:
-  - nombre, descripcion y avatar,
-  - password opcional,
-  - limite de miembros,
-  - alta de miembros al crear la sala.
-- Sistema de amigos:
-  - buscar usuarios por email,
-  - enviar solicitudes,
-  - aceptar o rechazar solicitudes,
-  - bloquear usuarios.
-- Mensajeria con distintos tipos de contenido:
-  - texto,
-  - imagenes,
-  - videos,
-  - audios,
-  - archivos,
-  - stickers.
-- Eliminacion de mensajes:
-  - eliminar para todos,
-  - ocultar solo para ti.
-- Reacciones a mensajes con emojis.
-- Llamadas de voz y videollamadas entre usuarios.
-- Personalizacion visual del chat, incluyendo fondo personalizado.
-- Sala especial "Chat con IA".
-- IA de texto con Gemini.
-- IA de imagen integrada desde el backend usando Cloudflare Workers AI.
+---
 
-## Tecnologias
+## 🧪 Cuentas de Prueba (Testing)
+Para probar la funcionalidad de amigos y chat en tiempo real sin registrarte, puedes usar estas dos cuentas en ventanas diferentes (o modo incógnito):
+
+| Usuario | Email | Contraseña |
+| :--- | :--- | :--- |
+| Admin 1 | `admin@gmail.com` | admin |
+| Admin 2 | `admin2@gmail.com` | admin2 |
+
+---
+
+## 🌟 Características
+
+- Autenticación: Registro, login y manejo de sesiones seguras con JWT.
+- Perfiles Personalizables: Edición de avatar, descripción y estados de usuario en tiempo real.
+- Comunicación en Tiempo Real: Implementación robusta de `Socket.IO` para mensajes instantáneos.
+- Salas Grupales: Creación de salas con avatares, descripciones, límites de miembros y protección por contraseña.
+- Sistema Social Completo: Búsqueda de usuarios por email, gestión de solicitudes de amistad y bloqueo de usuarios.
+- Mensajería Multimedia: Soporte para texto, imágenes, videos, audios, archivos y stickers.
+- Control de Mensajes: Funcionalidad de "Eliminar para todos" u ocultar mensajes localmente.
+- Interacción: Reacciones con emojis sincronizadas.
+- Llamadas: Soporte para llamadas de voz y videollamadas.
+- IA Integrada: - Texto: Generación de respuestas inteligentes mediante Google Gemini API.
+  - Imágenes: Generación de imágenes desde el chat usando Cloudflare Workers AI.
+
+## 🛠️ Tecnologías
 
 ### Frontend
-
-- React 19
-- Vite
-- React Router
-- Axios
-- Socket.IO Client
-- Tailwind CSS
-- Lucide React
-- Emoji Picker React
+- React 19 & Vite
+- Tailwind CSS (Estilizado)
+- Socket.IO Client (Tiempo real)
+- React Router & Axios
 
 ### Backend
+- Node.js & Express
+- Mongoose (Modelado de datos)
+- MongoDB Atlas (Base de datos en la nube)
+- JWT & Bcryptjs (Seguridad)
+- Multer (Gestión de archivos)
 
-- Node.js
-- Express
-- Socket.IO
-- MongoDB Atlas
-- Multer
-- JWT
-- bcryptjs
-- dotenv
-- Mongoose
+## 🏗️ Arquitectura y Despliegue
 
-## Arquitectura
+El proyecto sigue una arquitectura de monorepositorio con despliegue continuo (CI/CD):
 
-El proyecto esta dividido en dos partes:
+- Frontend: Alojado en Vercel con redirección de dominio personalizada.
+- Backend: Servidor Express en Render (Web Service).
+- Base de Datos: Cluster global en MongoDB Atlas.
+- DNS & Seguridad: Gestionado a través de Cloudflare con subdominio `chat.cristian-lavin.dev`.
 
-- `client/`: interfaz web del chat.
-- `server/`: API REST, sockets, persistencia en MongoDB Atlas y logica de IA.
-
-La persistencia usa colecciones en MongoDB Atlas a traves de Mongoose.
-
-## Funcionalidades principales
-
-### Autenticacion
-
-- Registro de usuario con email y password.
-- Inicio de sesion.
-- Persistencia del token en el cliente.
-- Ruta principal protegida.
-
-### Salas y conversacion
-
-- Carga de salas del usuario autenticado.
-- Creacion de salas desde modal.
-- Actualizacion y eliminacion de salas.
-- Consulta de mensajes por sala.
-- Soporte para salas protegidas por password.
-
-### Mensajes en tiempo real
-
-- Envio de mensajes por socket.
-- Sincronizacion en vivo al entrar a una sala.
-- Renderizado de contenido segun el tipo del mensaje.
-- Soporte para reacciones y borrado.
-
-### Archivos y multimedia
-
-- Subida de archivos al servidor.
-- Visualizacion de imagenes, video y audio en el chat.
-- Descarga de archivos compartidos.
-- Stickers predefinidos y personalizados.
-
-### IA
-
-- `POST /api/ai/chat`: genera respuestas de texto.
-- `POST /api/ai/image`: genera imagenes a partir de prompts.
-- La imagen se procesa en el backend y se entrega lista para mostrarse en el frontend.
-
-## Variables de entorno
+## ⚙️ Configuración de Entorno
 
 ### Backend (`server/.env`)
-
-Puedes copiar `server/.env.example` y completarlo:
-
 ```env
-PORT=3000
-MONGODB_URI=mongodb+srv://usuario:password@cluster.mongodb.net/chat-app?retryWrites=true&w=majority
-SECRET_KEY=cambia-esta-clave-en-produccion
-CLIENT_URL=http://localhost:5173,https://tu-frontend.vercel.app
+MONGODB_URI=mongodb+srv://...
+SECRET_KEY=...
+CLIENT_URL=[https://chat.cristian-lavin.dev](https://chat.cristian-lavin.dev)
+GEMINI_API_KEY=...
+CF_ACCOUNT_ID=...
+CF_AI_API_TOKEN=...
 
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.5-flash
+Frontend (client/.env)
+VITE_API_URL=[https://chat-7qt8.onrender.com](https://chat-7qt8.onrender.com)
+VITE_SOCKET_URL=[https://chat-7qt8.onrender.com](https://chat-7qt8.onrender.com)
 
-CF_ACCOUNT_ID=
-CF_AI_API_TOKEN=
-CF_IMAGE_MODEL=@cf/stabilityai/stable-diffusion-xl-base-1.0
-```
+🚀 Instalación y Ejecución Local
+1. Clonar el repositorio:
+git clone [https://github.com/CristianLavin/Chat.git](https://github.com/CristianLavin/Chat.git)
 
-### Frontend (`client/.env`)
+2. Backend:
+cd server
+npm install
+npm start
 
-Puedes copiar `client/.env.example`:
-
-```env
-VITE_API_URL=http://localhost:3000
-VITE_SOCKET_URL=http://localhost:3000
-```
-
-Notas:
-
-- `MONGODB_URI` apunta a tu cluster de MongoDB Atlas.
-- `CLIENT_URL` controla los origenes permitidos por CORS y Socket.IO.
-- `VITE_API_URL` y `VITE_SOCKET_URL` permiten que Vercel apunte al backend desplegado en Render.
-- `GEMINI_API_KEY` se usa para el chat con IA.
-- `CF_ACCOUNT_ID` y `CF_AI_API_TOKEN` se usan para generar imagenes con Cloudflare Workers AI.
-
-## Instalacion
-
-### 1. Instalar dependencias del cliente
-
-```bash
+3. Frontend:
 cd client
 npm install
-```
-
-### 2. Instalar dependencias del servidor
-
-```bash
-cd ../server
-npm install
-```
-
-## Ejecucion
-
-### Iniciar backend
-
-Desde `server/`:
-
-```bash
-npm start
-```
-
-El backend corre por defecto en:
-
-```text
-http://localhost:3000
-```
-
-### Iniciar frontend
-
-Desde `client/`:
-
-```bash
 npm run dev
-```
 
-El frontend corre normalmente en:
-
-```text
-http://localhost:5173
-```
-
-## Despliegue
-
-### Backend en Render
-
-- El repositorio incluye `render.yaml` con la configuracion base del servicio.
-- Crea un Web Service en Render apuntando a este repositorio o usa Blueprint deploy.
-- Render debe usar `server/` como `rootDir`.
-- Configura en Render las variables:
-  - `MONGODB_URI`
-  - `SECRET_KEY`
-  - `CLIENT_URL`
-  - `GEMINI_API_KEY` si quieres IA de texto
-  - `CF_ACCOUNT_ID` y `CF_AI_API_TOKEN` si quieres IA de imagen
-- El healthcheck queda disponible en `GET /api/health`.
-- Las subidas de archivos siguen usando disco local con `multer`, asi que en Render los archivos pueden perderse tras reinicios o redeploys. Para persistencia real en produccion conviene mover `uploads` a Cloudinary, S3 o similar.
-
-### Frontend en Vercel
-
-- Despliega la carpeta `client/` como proyecto de Vercel.
-- El archivo `client/vercel.json` deja la SPA lista para recargar rutas.
-- Configura estas variables en Vercel:
-  - `VITE_API_URL=https://tu-backend.onrender.com`
-  - `VITE_SOCKET_URL=https://tu-backend.onrender.com`
-
-### MongoDB Atlas
-
-- Crea un cluster en MongoDB Atlas.
-- Crea un usuario de base de datos y habilita acceso de red para Render.
-- Copia el connection string y usalo como valor de `MONGODB_URI`.
-- La app crea automaticamente las colecciones necesarias al iniciar.
-
-## Estructura del proyecto
-
-```text
+📂 Estructura del Proyecto
+Plaintext:
 Chat/
-├─ client/
-│  ├─ src/
-│  │  ├─ components/
-│  │  ├─ context/
-│  │  ├─ App.jsx
-│  │  └─ main.jsx
-│  ├─ .env.example
-│  ├─ vercel.json
-│  └─ package.json
-├─ server/
-│  ├─ .env.example
-│  ├─ db.js
-│  ├─ server.js
-│  └─ package.json
-├─ render.yaml
-└─ README.md
-```
+├─ client/      # Frontend en React (Vercel)
+├─ server/      # API y Sockets (Render)
+├─ render.yaml  # Configuración de Blueprint para Render
+└─ README.md    # Documentación del proyecto
 
-## Endpoints principales
-
-- `POST /api/register`
-- `POST /api/login`
-- `GET /api/auth/me`
-- `PUT /api/user/profile`
-- `GET /api/users/search`
-- `POST /api/friends/request`
-- `GET /api/friends/requests`
-- `PUT /api/friends/respond`
-- `GET /api/friends`
-- `POST /api/rooms`
-- `PUT /api/rooms/:roomId`
-- `DELETE /api/rooms/:roomId`
-- `GET /api/rooms`
-- `GET /api/messages/:roomId`
-- `POST /api/upload`
-- `POST /api/ai/chat`
-- `POST /api/ai/image`
-
-## Eventos de socket destacados
-
-- `register_user`
-- `join_room`
-- `send_message`
-- `delete_message`
-- `hide_message`
-- `add_reaction`
-- `remove_reaction`
-- `call_user`
-- `call_offer`
-- `call_answer`
-- `call_ice_candidate`
-- `call_hangup`
-
-## Estado actual
-
-El proyecto ya implementa una base funcional de chat moderno con tiempo real, multimedia, sistema social e integracion de IA tanto para texto como para imagen.
-
+Proyecto desarrollado por Cristian Lavín - Ingeniería Informática.
