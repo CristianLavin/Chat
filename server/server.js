@@ -7,7 +7,17 @@ const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v2: cloudinary } = require('cloudinary');
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+if (process.env.NODE_ENV !== 'production') {
+  require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+}
+
+// Justo después, añade estos logs temporales para descubrir al culpable:
+console.log("=== DEBUG DE CREDENCIALES ===");
+console.log("Entorno actual:", process.env.NODE_ENV);
+console.log("¿Gemini Key existe?:", !!process.env.GEMINI_API_KEY);
+console.log("¿Cloudflare Token existe?:", !!process.env.CF_AI_API_TOKEN);
+console.log("Modelo Gemini configurado:", process.env.GEMINI_MODEL);
+console.log("=============================");
 
 const {
   connectDB,
