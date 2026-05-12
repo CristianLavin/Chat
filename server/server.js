@@ -713,7 +713,7 @@ app.post('/api/ai/chat', async (req, res) => {
   }
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
         GEMINI_MODEL
       )}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
       {
