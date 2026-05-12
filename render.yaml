@@ -23,7 +23,7 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
-        value: gemini-2.0-flash
+        value: gemini-1.5-flash
       - key: CF_ACCOUNT_ID
         sync: false
       - key: CF_AI_API_TOKEN
