@@ -712,6 +712,7 @@ app.post('/api/ai/chat', async (req, res) => {
     });
   }
   try {
+    const modeloLimpio = GEMINI_MODEL.trim();
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
         GEMINI_MODEL
@@ -777,6 +778,8 @@ app.post('/api/ai/image', async (req, res) => {
     });
   }
   try {
+    const accountIdLimpio = CF_ACCOUNT_ID.trim();
+    const modeloImagenLimpio = CF_IMAGE_MODEL.trim();
     const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
       CF_ACCOUNT_ID
     )}/ai/run/${encodeURIComponent(CF_IMAGE_MODEL)}`;
