@@ -3,10 +3,10 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
-const fs = require('fs');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { v2: cloudinary } = require('cloudinary');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const {
@@ -30,6 +30,8 @@ const CF_AI_API_TOKEN = process.env.CF_AI_API_TOKEN || '';
 const CF_IMAGE_MODEL =
   process.env.CF_IMAGE_MODEL || '@cf/stabilityai/stable-diffusion-xl-base-1.0';
 const CLIENT_URL = process.env.CLIENT_URL || process.env.FRONTEND_URL || '';
+const CLOUDINARY_URL = process.env.CLOUDINARY_URL || '';
+const CLOUDINARY_FOLDER = process.env.CLOUDINARY_FOLDER || 'chat-app';
 
 const userSockets = {};
 const allowedOrigins = CLIENT_URL
@@ -51,26 +53,65 @@ app.use(
 );
 app.use(express.json({ limit: '10mb' }));
 
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+if (CLOUDINARY_URL) {
+  cloudinary.config({
+    cloudinary_url: CLOUDINARY_URL
+  });
 }
-app.use('/uploads', express.static(uploadDir));
 
-const storage = multer.diskStorage({
-  destination(req, file, cb) {
-    cb(null, uploadDir);
-  },
-  filename(req, file, cb) {
-    const safeOriginalName = file.originalname.replace(/\s+/g, '-');
-    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    cb(null, `${uniqueSuffix}-${safeOriginalName}`);
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 25 * 1024 * 1024
   }
 });
-const upload = multer({ storage });
 
 function isValidObjectId(value) {
   return mongoose.Types.ObjectId.isValid(value);
+}
+
+function isCloudinaryConfigured() {
+  return Boolean(CLOUDINARY_URL);
+}
+
+function sanitizePublicIdPart(value) {
+  return String(value || 'file')
+    .replace(/\.[^/.]+$/, '')
+    .replace(/[^a-zA-Z0-9_-]/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 80);
+}
+
+async function uploadToCloudinary(file, folder) {
+  if (!file) {
+    return null;
+  }
+
+  if (!isCloudinaryConfigured()) {
+    throw new Error(
+      'Cloudinary no esta configurado. Falta la variable CLOUDINARY_URL.'
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    const publicId = `${Date.now()}-${sanitizePublicIdPart(file.originalname)}`;
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: `${CLOUDINARY_FOLDER}/${folder}`,
+        public_id: publicId,
+        resource_type: 'auto'
+      },
+      (error, result) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(result);
+      }
+    );
+
+    stream.end(file.buffer);
+  });
 }
 
 function signToken(user) {
@@ -240,7 +281,8 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
 app.put('/api/user/profile', authenticateToken, upload.single('avatar'), async (req, res) => {
   try {
     const { username, description, status } = req.body;
-    const avatarUrl = req.file ? `/uploads/${req.file.filename}` : req.body.avatarUrl;
+    const uploadedAvatar = req.file ? await uploadToCloudinary(req.file, 'avatars/users') : null;
+    const avatarUrl = uploadedAvatar ? uploadedAvatar.secure_url : req.body.avatarUrl;
 
     const duplicateUsername = await User.findOne({
       username,
@@ -446,7 +488,8 @@ app.post('/api/rooms', authenticateToken, upload.single('avatar'), async (req, r
   try {
     const { name, type, password, description, max_members } = req.body;
     let members = req.body.members;
-    const avatarUrl = req.file ? `/uploads/${req.file.filename}` : null;
+    const uploadedAvatar = req.file ? await uploadToCloudinary(req.file, 'avatars/rooms') : null;
+    const avatarUrl = uploadedAvatar ? uploadedAvatar.secure_url : null;
 
     if (typeof members === 'string') {
       try {
@@ -531,7 +574,8 @@ app.put('/api/rooms/:roomId', authenticateToken, upload.single('avatar'), async 
   try {
     const { roomId } = req.params;
     const { name, description } = req.body;
-    const avatarUrl = req.file ? `/uploads/${req.file.filename}` : req.body.avatarUrl;
+    const uploadedAvatar = req.file ? await uploadToCloudinary(req.file, 'avatars/rooms') : null;
+    const avatarUrl = uploadedAvatar ? uploadedAvatar.secure_url : req.body.avatarUrl;
 
     if (!isValidObjectId(roomId)) {
       return res.status(404).json({ error: 'Room not found' });
@@ -633,12 +677,21 @@ app.get('/api/messages/:roomId', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/upload', authenticateToken, upload.single('file'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
+app.post('/api/upload', authenticateToken, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const uploadedFile = await uploadToCloudinary(req.file, 'chat-files');
+    res.json({ fileUrl: uploadedFile.secure_url, type: req.file.mimetype });
+  } catch (error) {
+    console.error('Cloudinary upload error:', error);
+    res.status(500).json({
+      error:
+        error.message || 'No se pudo subir el archivo a Cloudinary.'
+    });
   }
-  const fileUrl = `/uploads/${req.file.filename}`;
-  res.json({ fileUrl, type: req.file.mimetype });
 });
 
 app.post('/api/ai/chat', async (req, res) => {

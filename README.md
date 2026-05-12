@@ -43,7 +43,7 @@ Para probar la funcionalidad de amigos y chat en tiempo real sin registrarte, pu
 - Mongoose (Modelado de datos)
 - MongoDB Atlas (Base de datos en la nube)
 - JWT & Bcryptjs (Seguridad)
-- Multer (Gestión de archivos)
+- Multer + Cloudinary (Gestión de archivos y almacenamiento en la nube)
 
 ## 🏗️ Arquitectura y Despliegue
 
@@ -60,14 +60,21 @@ El proyecto sigue una arquitectura de monorepositorio con despliegue continuo (C
 ```env
 MONGODB_URI=mongodb+srv://...
 SECRET_KEY=...
-CLIENT_URL=[https://chat.cristian-lavin.dev](https://chat.cristian-lavin.dev)
+CLIENT_URL=https://chat.cristian-lavin.dev
+
+CLOUDINARY_URL=cloudinary://<your_api_key>:<your_api_secret>@da4q9jiqr
+CLOUDINARY_FOLDER=chat-app
+
 GEMINI_API_KEY=...
 CF_ACCOUNT_ID=...
 CF_AI_API_TOKEN=...
+```
 
-Frontend (client/.env)
+### Frontend (`client/.env`)
+```env
 VITE_API_URL=[https://chat-7qt8.onrender.com](https://chat-7qt8.onrender.com)
 VITE_SOCKET_URL=[https://chat-7qt8.onrender.com](https://chat-7qt8.onrender.com)
+```
 
 🚀 Instalación y Ejecución Local
 1. Clonar el repositorio:
