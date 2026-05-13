@@ -712,66 +712,64 @@ app.post('/api/ai/chat', async (req, res) => {
     });
   }
   try {
-    try {
-      // Debug: Consultar qué modelos tienes habilitados realmente
-      const checkModels = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
-      const modelsData = await checkModels.json();
-      if (modelsData.models) {
-        const flashModels = modelsData.models
-          .map(m => m.name.replace('models/', ''))
-          .filter(name => name.includes('flash'));
-        console.log("=== MODELOS FLASH PERMITIDOS PARA TU LLAVE ===");
-        console.log(flashModels);
-        console.log("==============================================");
-      }
-    } catch (e) {
-      console.log("No se pudo listar los modelos", e);
+    const checkModels = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
+    const modelsData = await checkModels.json();
+    if (modelsData.models) {
+      const flashModels = modelsData.models
+        .map(m => m.name.replace('models/', ''))
+        .filter(name => name.includes('flash'));
+      console.log("=== MODELOS FLASH PERMITIDOS PARA TU LLAVE ===");
+      console.log(flashModels);
+      console.log("==============================================");
     }
-    const modeloLimpio = GEMINI_MODEL.trim();
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-        GEMINI_MODEL
-      )}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: 'user',
-              parts: [{ text: message }]
-            }
-          ]
-        })
-      }
-    );
-    const data = await response.json();
-    let answer = 'No he podido generar una respuesta.';
-    if (data && data.error && data.error.message) {
-      console.error('Gemini API error (chat):', data.error);
-      answer = `Error de Gemini: ${data.error.message}`;
-    } else if (
-      data &&
-      data.candidates &&
-      data.candidates[0] &&
-      data.candidates[0].content &&
-      data.candidates[0].content.parts &&
-      data.candidates[0].content.parts[0] &&
-      data.candidates[0].content.parts[0].text
-    ) {
-      answer = data.candidates[0].content.parts[0].text.trim();
-    } else {
-      console.error('Gemini API respuesta inesperada (chat):', data);
-    }
-    res.json({ answer });
-  } catch (err) {
-    console.error('Error en /api/ai/chat', err);
-    res.json({
-      answer: 'Ha habido un problema al contactar con la IA real, pero puedes seguir chateando aquí.'
-    });
+  } catch (e) {
+    console.log("No se pudo listar los modelos", e);
   }
+  const modeloLimpio = GEMINI_MODEL.trim();
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      GEMINI_MODEL
+    )}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: message }]
+          }
+        ]
+      })
+    }
+  );
+  const data = await response.json();
+  let answer = 'No he podido generar una respuesta.';
+  if (data && data.error && data.error.message) {
+    console.error('Gemini API error (chat):', data.error);
+    answer = `Error de Gemini: ${data.error.message}`;
+  } else if (
+    data &&
+    data.candidates &&
+    data.candidates[0] &&
+    data.candidates[0].content &&
+    data.candidates[0].content.parts &&
+    data.candidates[0].content.parts[0] &&
+    data.candidates[0].content.parts[0].text
+  ) {
+    answer = data.candidates[0].content.parts[0].text.trim();
+  } else {
+    console.error('Gemini API respuesta inesperada (chat):', data);
+  }
+  res.json({ answer });
+} catch (err) {
+  console.error('Error en /api/ai/chat', err);
+  res.json({
+    answer: 'Ha habido un problema al contactar con la IA real, pero puedes seguir chateando aquí.'
+  });
+}
 });
 
 app.post('/api/ai/image', async (req, res) => {
