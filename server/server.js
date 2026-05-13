@@ -712,6 +712,21 @@ app.post('/api/ai/chat', async (req, res) => {
     });
   }
   try {
+    try {
+      // Debug: Consultar qué modelos tienes habilitados realmente
+      const checkModels = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
+      const modelsData = await checkModels.json();
+      if (modelsData.models) {
+        const flashModels = modelsData.models
+          .map(m => m.name.replace('models/', ''))
+          .filter(name => name.includes('flash'));
+        console.log("=== MODELOS FLASH PERMITIDOS PARA TU LLAVE ===");
+        console.log(flashModels);
+        console.log("==============================================");
+      }
+    } catch (e) {
+      console.log("No se pudo listar los modelos", e);
+    }
     const modeloLimpio = GEMINI_MODEL.trim();
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
