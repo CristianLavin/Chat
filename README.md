@@ -28,7 +28,7 @@ Para probar la funcionalidad de amigos y chat en tiempo real sin registrarte, pu
 - Interacción: Reacciones con emojis sincronizadas.
 - Llamadas: Soporte para llamadas de voz y videollamadas.
 - IA de Texto: Chat con Groq usando modelos Llama 3.
-- IA de Imagen: Generación de imágenes con Hugging Face usando Stable Diffusion XL.
+- IA de Imagen: Generacion de imagenes con Pollinations.ai en formato base64.
 
 ## 🛠️ Tecnologías
 
@@ -45,7 +45,7 @@ Para probar la funcionalidad de amigos y chat en tiempo real sin registrarte, pu
 - JWT & Bcryptjs (Seguridad)
 - Multer + Cloudinary (Gestión de archivos y almacenamiento en la nube)
 - Groq API (IA de texto)
-- Hugging Face Inference API (IA de imagen)
+- Pollinations.ai (IA de imagen)
 
 ## 🏗️ Arquitectura y Despliegue
 
@@ -69,10 +69,9 @@ CLOUDINARY_FOLDER=chat-app
 
 GROQ_API_KEY=...
 GROQ_MODEL=llama-3.1-8b-instant
-
-HF_API_TOKEN=...
-HF_IMAGE_MODEL=stabilityai/stable-diffusion-xl-base-1.0
 ```
+
+La generacion de imagenes con Pollinations.ai no requiere variables de entorno adicionales.
 
 ### Frontend (`client/.env`)
 ```env

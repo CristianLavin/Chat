@@ -19,6 +19,7 @@ const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
 export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoom }) {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
+  const [aiMode, setAiMode] = useState('text');
   const [file, setFile] = useState(null);
   const [isLocked, setIsLocked] = useState(false);
   const [roomPassword, setRoomPassword] = useState('');
@@ -48,7 +49,6 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
   const isVideoCallRef = useRef(false);
   const pendingOfferRef = useRef(null);
   const isAIRoom = room?.type === 'ai';
-  const [aiMode, setAiMode] = useState('text');
 
   useEffect(() => {
     // Close emoji picker when clicking outside
@@ -69,6 +69,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
     setIsLocked(false);
     setRoomPassword('');
     setSelectedMessageId(null);
+    setAiMode('text');
     if (!isAIRoom) {
       fetchMessages();
     }
@@ -403,24 +404,6 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const formatAIImageError = (raw) => {
-    if (!raw) return null;
-    const text = String(raw);
-    const lower = text.toLowerCase();
-
-    if (lower.includes('authorization header is correct') || lower.includes('unauthorized')) {
-      return 'La clave de Hugging Face no es valida o no tiene permisos suficientes.';
-    }
-    if (lower.includes('currently loading')) {
-      return 'El modelo de imagen aun se esta cargando en Hugging Face. Intenta de nuevo en unos segundos.';
-    }
-    if (lower.includes('rate limit') || lower.includes('too many requests')) {
-      return 'Se alcanzo el limite de uso del proveedor de imagenes. Intenta mas tarde.';
-    }
-
-    return text;
-  };
-
   const handleSendAIChat = async () => {
     const content = newMessage.trim();
     if (!content || !user) return;
@@ -440,6 +423,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
 
     setMessages(prev => [...prev, userMessage]);
     setNewMessage('');
+    scrollToBottom();
 
     try {
       const res = await axios.post('/api/ai/chat', { message: content });
@@ -458,77 +442,6 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
       };
 
       setMessages(prev => [...prev, aiMessage]);
-
-      const lower = content.toLowerCase();
-      if (lower.includes('imagen') || lower.includes('image') || lower.includes('foto')) {
-        const loadingId = Date.now() + 2;
-        setMessages(prev => [
-          ...prev,
-          {
-            id: loadingId,
-            room_id: room.id,
-            sender_id: 'ai',
-            content: 'Estoy generando una imagen, esto puede tardar unos segundos...',
-            type: 'text',
-            file_url: null,
-            created_at: new Date(),
-            username: 'IA',
-            avatar: null,
-            is_deleted: 0
-          }
-        ]);
-
-        try {
-          const imgRes = await axios.post('/api/ai/image', { prompt: content });
-          const imageUrl = imgRes.data?.imageUrl || null;
-          const errorText = formatAIImageError(imgRes.data?.error || null);
-
-          if (imageUrl) {
-            setMessages(prev =>
-              prev.map(m =>
-                m.id === loadingId
-                  ? {
-                      id: Date.now() + 3,
-                      room_id: room.id,
-                      sender_id: 'ai',
-                      content,
-                      type: 'image',
-                      file_url: imageUrl,
-                      created_at: new Date(),
-                      username: 'IA',
-                      avatar: null,
-                      is_deleted: 0
-                    }
-                  : m
-              )
-            );
-          } else {
-            setMessages(prev =>
-              prev.map(m =>
-                m.id === loadingId
-                  ? {
-                      ...m,
-                      content:
-                        errorText ||
-                        'No se pudo generar la imagen con Hugging Face.'
-                    }
-                  : m
-              )
-            );
-          }
-        } catch (error) {
-          setMessages(prev =>
-            prev.map(m =>
-              m.id === loadingId
-                ? {
-                    ...m,
-                    content: 'Ha habido un error al generar la imagen.'
-                  }
-                : m
-            )
-          );
-        }
-      }
 
       scrollToBottom();
     } catch (err) {
@@ -550,15 +463,15 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
     }
   };
 
-  const handleGenerateAIImage = async () => {
-    const content = newMessage.trim();
-    if (!content || !user) return;
+  const handleSendAIImage = async () => {
+    const prompt = newMessage.trim();
+    if (!prompt || !user) return;
 
     const userMessage = {
       id: Date.now(),
       room_id: room.id,
       sender_id: user.id,
-      content,
+      content: prompt,
       type: 'text',
       file_url: null,
       created_at: new Date(),
@@ -569,36 +482,21 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
 
     setMessages(prev => [...prev, userMessage]);
     setNewMessage('');
+    scrollToBottom();
 
     try {
-      const res = await axios.post('/api/ai/image', { prompt: content });
+      const res = await axios.post('/api/ai/image', { prompt });
       const imageUrl = res.data?.imageUrl || null;
-      const errorText = formatAIImageError(res.data?.error || null);
+      const error = res.data?.error || null;
 
-      if (imageUrl) {
+      if (!imageUrl) {
         setMessages(prev => [
           ...prev,
           {
             id: Date.now() + 1,
             room_id: room.id,
             sender_id: 'ai',
-            content,
-            type: 'image',
-            file_url: imageUrl,
-            created_at: new Date(),
-            username: 'IA',
-            avatar: null,
-            is_deleted: 0
-          }
-        ]);
-      } else {
-        setMessages(prev => [
-          ...prev,
-          {
-            id: Date.now() + 2,
-            room_id: room.id,
-            sender_id: 'ai',
-            content: errorText || 'No se pudo generar la imagen con Hugging Face.',
+            content: error || 'No he podido generar la imagen.',
             type: 'text',
             file_url: null,
             created_at: new Date(),
@@ -607,17 +505,34 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
             is_deleted: 0
           }
         ]);
+        return;
       }
 
-      scrollToBottom();
-    } catch (err) {
       setMessages(prev => [
         ...prev,
         {
           id: Date.now() + 2,
           room_id: room.id,
           sender_id: 'ai',
-          content: 'Ha habido un error al generar la imagen.',
+          content: prompt,
+          type: 'image',
+          file_url: imageUrl,
+          created_at: new Date(),
+          username: 'IA',
+          avatar: null,
+          is_deleted: 0
+        }
+      ]);
+
+      scrollToBottom();
+    } catch (err) {
+      setMessages(prev => [
+        ...prev,
+        {
+          id: Date.now() + 3,
+          room_id: room.id,
+          sender_id: 'ai',
+          content: 'Ha habido un error al contactar con la IA de imagen.',
           type: 'text',
           file_url: null,
           created_at: new Date(),
@@ -633,7 +548,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
     e.preventDefault();
     if (isAIRoom) {
       if (aiMode === 'image') {
-        await handleGenerateAIImage();
+        await handleSendAIImage();
       } else {
         await handleSendAIChat();
       }
@@ -1230,6 +1145,37 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
 
       {/* Input */}
       <div className="p-4 bg-white border-t">
+        {isAIRoom && (
+          <div className="mb-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setAiMode('text')}
+              className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
+                aiMode === 'text'
+                  ? 'bg-blue-500 text-white border-blue-500'
+                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              Texto
+            </button>
+            <button
+              type="button"
+              onClick={() => setAiMode('image')}
+              className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
+                aiMode === 'image'
+                  ? 'bg-purple-500 text-white border-purple-500'
+                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              Imagen
+            </button>
+            <span className="text-xs text-gray-500">
+              {aiMode === 'image'
+                ? 'Pollinations genera una imagen desde tu prompt.'
+                : 'Groq responde en texto a tu mensaje.'}
+            </span>
+          </div>
+        )}
         {file && (
             <div className="mb-2 p-2 bg-gray-100 rounded flex justify-between items-center">
                 <span className="text-sm truncate max-w-xs">{file.name}</span>
@@ -1237,7 +1183,8 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
             </div>
         )}
         <form onSubmit={handleSendMessage} className="flex items-center space-x-2">
-            <div className="relative flex items-center gap-1">
+            {!isAIRoom && (
+              <div className="relative flex items-center gap-1">
                 <div ref={emojiPickerRef}>
                     <button 
                         type="button"
@@ -1309,7 +1256,8 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
                       </div>
                     )}
                 </div>
-            </div>
+              </div>
+            )}
 
             {!isAIRoom && (
               <>
@@ -1328,38 +1276,16 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
                 />
               </>
             )}
-            {isAIRoom && (
-              <div className="mr-2 flex items-center">
-                <div className="inline-flex rounded-full bg-gray-200 p-1 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setAiMode('text')}
-                    className={`px-2 py-1 rounded-full ${
-                      aiMode === 'text'
-                        ? 'bg-white text-gray-900 shadow'
-                        : 'text-gray-600'
-                    }`}
-                  >
-                    Texto
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAiMode('image')}
-                    className={`px-2 py-1 rounded-full ${
-                      aiMode === 'image'
-                        ? 'bg-white text-gray-900 shadow'
-                        : 'text-gray-600'
-                    }`}
-                  >
-                    Imagen
-                  </button>
-                </div>
-              </div>
-            )}
             <input 
                 type="text" 
                 className="flex-1 border rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder={isAIRoom ? 'Escribe tu prompt...' : 'Type a message...'}
+                placeholder={
+                  isAIRoom
+                    ? aiMode === 'image'
+                      ? 'Describe la imagen que quieres generar...'
+                      : 'Escribe tu mensaje para la IA...'
+                    : 'Type a message...'
+                }
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
             />

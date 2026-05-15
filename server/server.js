@@ -30,9 +30,6 @@ const CLOUDINARY_URL = process.env.CLOUDINARY_URL || '';
 const CLOUDINARY_FOLDER = process.env.CLOUDINARY_FOLDER || 'chat-app';
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.1-8b-instant';
-const HF_API_TOKEN = process.env.HF_API_TOKEN || '';
-const HF_IMAGE_MODEL =
-  process.env.HF_IMAGE_MODEL || 'stabilityai/stable-diffusion-xl-base-1.0';
 
 const userSockets = {};
 const allowedOrigins = CLIENT_URL
@@ -749,40 +746,25 @@ app.post('/api/ai/image', async (req, res) => {
     return res.status(400).json({ error: 'Descripcion requerida' });
   }
 
-  if (!HF_API_TOKEN) {
-    return res.json({
-      imageUrl: null,
-      error: 'La IA de imagenes no esta configurada (falta HF_API_TOKEN).'
-    });
-  }
-
   try {
-    const modeloImagen = HF_IMAGE_MODEL
-      ? HF_IMAGE_MODEL.trim()
-      : 'stabilityai/stable-diffusion-xl-base-1.0';
-    const url = `https://api-inference.huggingface.co/models/${modeloImagen}`;
+    const promptSeguro = encodeURIComponent(prompt.trim());
+    const seed = Math.floor(Math.random() * 1000000);
+    const url = `https://image.pollinations.ai/prompt/${promptSeguro}?seed=${seed}&nologo=true`;
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${HF_API_TOKEN.trim()}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ inputs: prompt })
-    });
+    const response = await fetch(url);
 
     if (!response.ok) {
-      const errText = await response.text();
-      console.error(`Hugging Face error (status ${response.status}):`, errText);
+      console.error(`Pollinations error (status ${response.status})`);
       return res.json({
         imageUrl: null,
-        error: 'Hugging Face devolvio un error al generar la imagen. Intenta de nuevo.'
+        error: 'El servidor de imagenes devolvio un error.'
       });
     }
 
     const arrayBuffer = await response.arrayBuffer();
     const base64 = Buffer.from(arrayBuffer).toString('base64');
-    const imageUrl = `data:image/png;base64,${base64}`;
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    const imageUrl = `data:${contentType};base64,${base64}`;
 
     res.json({ imageUrl });
   } catch (err) {
