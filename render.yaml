@@ -20,13 +20,11 @@ services:
         sync: false
       - key: CLOUDINARY_FOLDER
         value: chat-app
-      - key: GEMINI_API_KEY
+      - key: GROQ_API_KEY
         sync: false
-      - key: GEMINI_MODEL
-        value: gemini-1.5-flash
-      - key: CF_ACCOUNT_ID
+      - key: GROQ_MODEL
+        value: llama3-8b-8192
+      - key: HUGGING_FACE_API_KEY
         sync: false
-      - key: CF_AI_API_TOKEN
-        sync: false
-      - key: CF_IMAGE_MODEL
-        value: "@cf/stabilityai/stable-diffusion-xl-base-1.0"
+      - key: HUGGING_FACE_IMAGE_MODEL
+        value: stabilityai/stable-diffusion-xl-base-1.0

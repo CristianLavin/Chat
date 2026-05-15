@@ -1,4 +1,4 @@
-import { Plus, User, LogOut, UserPlus, Users, Bell, Bot } from 'lucide-react';
+import { Plus, User, LogOut, UserPlus, Bell, Bot } from 'lucide-react';
 import { useContext, useState } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import AddFriendModal from './AddFriendModal';

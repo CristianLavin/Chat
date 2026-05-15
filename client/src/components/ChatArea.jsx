@@ -48,6 +48,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
   const isVideoCallRef = useRef(false);
   const pendingOfferRef = useRef(null);
   const isAIRoom = room?.type === 'ai';
+  const [aiMode, setAiMode] = useState('text');
 
   useEffect(() => {
     // Close emoji picker when clicking outside
@@ -208,7 +209,7 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
         socket.off('call_ice_candidate', handleCallIceCandidate);
         socket.off('call_hangup', handleCallHangup);
     };
-  }, [socket, room.id, user]);
+  }, [socket, room.id, user, isAIRoom]);
 
   const createPeerConnection = (remoteId) => {
     const pc = new RTCPeerConnection({
@@ -405,17 +406,20 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
   const formatAIImageError = (raw) => {
     if (!raw) return null;
     const text = String(raw);
-    if (text.includes('You exceeded your current quota') || text.includes('Quota exceeded for metric')) {
-      return 'Tu cuenta de imágenes de IA no tiene cuota disponible. Revisa el plan y la facturación del proveedor.';
-    }
     const lower = text.toLowerCase();
-    if (lower.includes('invalid api key') || lower.includes('incorrect api key')) {
-      return 'La clave de la API de imágenes no es válida. Revisa la configuración del servidor.';
+
+    if (lower.includes('authorization header is correct') || lower.includes('unauthorized')) {
+      return 'La clave de Hugging Face no es valida o no tiene permisos suficientes.';
     }
+    if (lower.includes('currently loading')) {
+      return 'El modelo de imagen aun se esta cargando en Hugging Face. Intenta de nuevo en unos segundos.';
+    }
+    if (lower.includes('rate limit') || lower.includes('too many requests')) {
+      return 'Se alcanzo el limite de uso del proveedor de imagenes. Intenta mas tarde.';
+    }
+
     return text;
   };
-
-  const [aiMode, setAiMode] = useState('text');
 
   const handleSendAIChat = async () => {
     const content = newMessage.trim();
@@ -439,11 +443,11 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
 
     try {
       const res = await axios.post('/api/ai/chat', { message: content });
-      const answer = res.data && res.data.answer ? res.data.answer : 'No he podido generar una respuesta.';
+      const answer = res.data?.answer || 'No he podido generar una respuesta.';
       const aiMessage = {
         id: Date.now() + 1,
         room_id: room.id,
-        sender_id: 0,
+        sender_id: 'ai',
         content: answer,
         type: 'text',
         file_url: null,
@@ -452,100 +456,97 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
         avatar: null,
         is_deleted: 0
       };
+
       setMessages(prev => [...prev, aiMessage]);
 
       const lower = content.toLowerCase();
       if (lower.includes('imagen') || lower.includes('image') || lower.includes('foto')) {
         const loadingId = Date.now() + 2;
-        const loadingMessage = {
-          id: loadingId,
-          room_id: room.id,
-          sender_id: 0,
-          content: 'Estoy generando una imagen, esto puede tardar unos segundos...',
-          type: 'text',
-          file_url: null,
-          created_at: new Date(),
-          username: 'IA',
-          avatar: null,
-          is_deleted: 0
-        };
-        setMessages(prev => [...prev, loadingMessage]);
-
-        try {
-          const imgRes = await axios.post('/api/ai/image', { prompt: content });
-          const imageUrl = imgRes.data && imgRes.data.imageUrl ? imgRes.data.imageUrl : null;
-          const errorText = formatAIImageError(
-            imgRes.data && imgRes.data.error ? imgRes.data.error : null
-          );
-
-          if (imageUrl) {
-            const aiImageMessage = {
-              id: Date.now() + 3,
-              room_id: room.id,
-              sender_id: 0,
-              content: content,
-              type: 'image',
-              file_url: imageUrl,
-              created_at: new Date(),
-              username: 'IA',
-              avatar: null,
-              is_deleted: 0
-            };
-            setMessages(prev =>
-              prev.map(m => (m.id === loadingId ? aiImageMessage : m))
-            );
-          } else {
-            const errorMessage = {
-              id: loadingId,
-              room_id: room.id,
-              sender_id: 0,
-              content:
-                errorText ||
-                'No se pudo generar la imagen con Cloudflare Workers AI, pero puedes seguir chateando aquí.',
-              type: 'text',
-              file_url: null,
-              created_at: new Date(),
-              username: 'IA',
-              avatar: null,
-              is_deleted: 0
-            };
-            setMessages(prev =>
-              prev.map(m => (m.id === loadingId ? errorMessage : m))
-            );
-          }
-        } catch (e) {
-          const errorMessage = {
+        setMessages(prev => [
+          ...prev,
+          {
             id: loadingId,
             room_id: room.id,
-            sender_id: 0,
-            content: 'Ha habido un error al generar la imagen.',
+            sender_id: 'ai',
+            content: 'Estoy generando una imagen, esto puede tardar unos segundos...',
             type: 'text',
             file_url: null,
             created_at: new Date(),
             username: 'IA',
             avatar: null,
             is_deleted: 0
-          };
+          }
+        ]);
+
+        try {
+          const imgRes = await axios.post('/api/ai/image', { prompt: content });
+          const imageUrl = imgRes.data?.imageUrl || null;
+          const errorText = formatAIImageError(imgRes.data?.error || null);
+
+          if (imageUrl) {
+            setMessages(prev =>
+              prev.map(m =>
+                m.id === loadingId
+                  ? {
+                      id: Date.now() + 3,
+                      room_id: room.id,
+                      sender_id: 'ai',
+                      content,
+                      type: 'image',
+                      file_url: imageUrl,
+                      created_at: new Date(),
+                      username: 'IA',
+                      avatar: null,
+                      is_deleted: 0
+                    }
+                  : m
+              )
+            );
+          } else {
+            setMessages(prev =>
+              prev.map(m =>
+                m.id === loadingId
+                  ? {
+                      ...m,
+                      content:
+                        errorText ||
+                        'No se pudo generar la imagen con Hugging Face.'
+                    }
+                  : m
+              )
+            );
+          }
+        } catch (error) {
           setMessages(prev =>
-            prev.map(m => (m.id === loadingId ? errorMessage : m))
+            prev.map(m =>
+              m.id === loadingId
+                ? {
+                    ...m,
+                    content: 'Ha habido un error al generar la imagen.'
+                  }
+                : m
+            )
           );
         }
       }
+
       scrollToBottom();
     } catch (err) {
-      const errorMessage = {
-        id: Date.now() + 2,
-        room_id: room.id,
-        sender_id: 0,
-        content: 'Ha habido un error al contactar con la IA.',
-        type: 'text',
-        file_url: null,
-        created_at: new Date(),
-        username: 'IA',
-        avatar: null,
-        is_deleted: 0
-      };
-      setMessages(prev => [...prev, errorMessage]);
+      setMessages(prev => [
+        ...prev,
+        {
+          id: Date.now() + 2,
+          room_id: room.id,
+          sender_id: 'ai',
+          content: 'Ha habido un error al contactar con la IA de texto.',
+          type: 'text',
+          file_url: null,
+          created_at: new Date(),
+          username: 'IA',
+          avatar: null,
+          is_deleted: 0
+        }
+      ]);
     }
   };
 
@@ -570,58 +571,61 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
     setNewMessage('');
 
     try {
-        const res = await axios.post('/api/ai/image', { prompt: content });
-      const imageUrl = res.data && res.data.imageUrl ? res.data.imageUrl : null;
-      const errorText = formatAIImageError(
-        res.data && res.data.error ? res.data.error : null
-      );
+      const res = await axios.post('/api/ai/image', { prompt: content });
+      const imageUrl = res.data?.imageUrl || null;
+      const errorText = formatAIImageError(res.data?.error || null);
 
       if (imageUrl) {
-        const aiMessage = {
-          id: Date.now() + 1,
-          room_id: room.id,
-          sender_id: 0,
-          content: content,
-          type: 'image',
-          file_url: imageUrl,
-          created_at: new Date(),
-          username: 'IA',
-          avatar: null,
-          is_deleted: 0
-        };
-        setMessages(prev => [...prev, aiMessage]);
+        setMessages(prev => [
+          ...prev,
+          {
+            id: Date.now() + 1,
+            room_id: room.id,
+            sender_id: 'ai',
+            content,
+            type: 'image',
+            file_url: imageUrl,
+            created_at: new Date(),
+            username: 'IA',
+            avatar: null,
+            is_deleted: 0
+          }
+        ]);
       } else {
-        const errorMessage = {
+        setMessages(prev => [
+          ...prev,
+          {
+            id: Date.now() + 2,
+            room_id: room.id,
+            sender_id: 'ai',
+            content: errorText || 'No se pudo generar la imagen con Hugging Face.',
+            type: 'text',
+            file_url: null,
+            created_at: new Date(),
+            username: 'IA',
+            avatar: null,
+            is_deleted: 0
+          }
+        ]);
+      }
+
+      scrollToBottom();
+    } catch (err) {
+      setMessages(prev => [
+        ...prev,
+        {
           id: Date.now() + 2,
           room_id: room.id,
-          sender_id: 0,
-          content:
-            errorText ||
-            'No se pudo generar la imagen con Cloudflare Workers AI, pero puedes seguir chateando aquí.',
+          sender_id: 'ai',
+          content: 'Ha habido un error al generar la imagen.',
           type: 'text',
           file_url: null,
           created_at: new Date(),
           username: 'IA',
           avatar: null,
           is_deleted: 0
-        };
-        setMessages(prev => [...prev, errorMessage]);
-      }
-      scrollToBottom();
-    } catch (err) {
-      const errorMessage = {
-        id: Date.now() + 2,
-        room_id: room.id,
-        sender_id: 0,
-        content: 'Ha habido un error al generar la imagen.',
-        type: 'text',
-        file_url: null,
-        created_at: new Date(),
-        username: 'IA',
-        avatar: null,
-        is_deleted: 0
-      };
-      setMessages(prev => [...prev, errorMessage]);
+        }
+      ]);
     }
   };
 
@@ -1355,14 +1359,14 @@ export default function ChatArea({ socket, room, user, onDeleteRoom, onUpdateRoo
             <input 
                 type="text" 
                 className="flex-1 border rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Type a message..."
+                placeholder={isAIRoom ? 'Escribe tu prompt...' : 'Type a message...'}
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
             />
             <button 
                 type="submit" 
                 className="p-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 disabled:opacity-50"
-                disabled={!newMessage.trim() && !file}
+                disabled={isAIRoom ? !newMessage.trim() : (!newMessage.trim() && !file)}
             >
                 <Send size={20} />
             </button>

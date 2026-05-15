@@ -108,7 +108,7 @@ export default function ChatLayout() {
       name: 'Chat con IA',
       type: 'ai',
       created_by: user.id,
-      description: 'Habla con un asistente de IA',
+      description: 'Texto con Groq y generacion de imagenes con Hugging Face',
       avatar: null
     };
     setCurrentRoom(aiRoom);

@@ -1,6 +1,6 @@
 # Chat App 🚀
 
-Aplicación de chat Full Stack en tiempo real con inteligencia artificial integrada. Desplegada y operativa en producción.
+Aplicación de chat Full Stack en tiempo real con IA de texto e imagen. Desplegada y operativa en producción.
 
 🔗 Demo en vivo: [https://chat.cristian-lavin.dev](https://chat.cristian-lavin.dev)
 
@@ -27,8 +27,8 @@ Para probar la funcionalidad de amigos y chat en tiempo real sin registrarte, pu
 - Control de Mensajes: Funcionalidad de "Eliminar para todos" u ocultar mensajes localmente.
 - Interacción: Reacciones con emojis sincronizadas.
 - Llamadas: Soporte para llamadas de voz y videollamadas.
-- IA Integrada: - Texto: Generación de respuestas inteligentes mediante Google Gemini API.
-  - Imágenes: Generación de imágenes desde el chat usando Cloudflare Workers AI.
+- IA de Texto: Chat con Groq usando modelos Llama 3.
+- IA de Imagen: Generación de imágenes con Hugging Face usando Stable Diffusion XL.
 
 ## 🛠️ Tecnologías
 
@@ -44,6 +44,8 @@ Para probar la funcionalidad de amigos y chat en tiempo real sin registrarte, pu
 - MongoDB Atlas (Base de datos en la nube)
 - JWT & Bcryptjs (Seguridad)
 - Multer + Cloudinary (Gestión de archivos y almacenamiento en la nube)
+- Groq API (IA de texto)
+- Hugging Face Inference API (IA de imagen)
 
 ## 🏗️ Arquitectura y Despliegue
 
@@ -65,9 +67,11 @@ CLIENT_URL=https://chat.cristian-lavin.dev
 CLOUDINARY_URL=cloudinary://<your_api_key>:<your_api_secret>@da4q9jiqr
 CLOUDINARY_FOLDER=chat-app
 
-GEMINI_API_KEY=...
-CF_ACCOUNT_ID=...
-CF_AI_API_TOKEN=...
+GROQ_API_KEY=...
+GROQ_MODEL=llama3-8b-8192
+
+HUGGING_FACE_API_KEY=...
+HUGGING_FACE_IMAGE_MODEL=stabilityai/stable-diffusion-xl-base-1.0
 ```
 
 ### Frontend (`client/.env`)
