@@ -29,10 +29,10 @@ const CLIENT_URL = process.env.CLIENT_URL || process.env.FRONTEND_URL || '';
 const CLOUDINARY_URL = process.env.CLOUDINARY_URL || '';
 const CLOUDINARY_FOLDER = process.env.CLOUDINARY_FOLDER || 'chat-app';
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
-const GROQ_MODEL = process.env.GROQ_MODEL || 'llama3-8b-8192';
-const HUGGING_FACE_API_KEY = process.env.HUGGING_FACE_API_KEY || '';
-const HUGGING_FACE_IMAGE_MODEL =
-  process.env.HUGGING_FACE_IMAGE_MODEL || 'stabilityai/stable-diffusion-xl-base-1.0';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.1-8b-instant';
+const HF_API_TOKEN = process.env.HF_API_TOKEN || '';
+const HF_IMAGE_MODEL =
+  process.env.HF_IMAGE_MODEL || 'stabilityai/stable-diffusion-xl-base-1.0';
 
 const userSockets = {};
 const allowedOrigins = CLIENT_URL
@@ -112,39 +112,6 @@ async function uploadToCloudinary(file, folder) {
     );
 
     stream.end(file.buffer);
-  });
-}
-
-async function uploadBufferToCloudinary(buffer, folder, filename, mimeType) {
-  if (!buffer) {
-    return null;
-  }
-
-  if (!isCloudinaryConfigured()) {
-    throw new Error(
-      'Cloudinary no esta configurado. Falta la variable CLOUDINARY_URL.'
-    );
-  }
-
-  return new Promise((resolve, reject) => {
-    const publicId = `${Date.now()}-${sanitizePublicIdPart(filename || 'generated-image')}`;
-    const stream = cloudinary.uploader.upload_stream(
-      {
-        folder: `${CLOUDINARY_FOLDER}/${folder}`,
-        public_id: publicId,
-        resource_type: 'auto',
-        format: mimeType === 'image/jpeg' ? 'jpg' : 'png'
-      },
-      (error, result) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve(result);
-      }
-    );
-
-    stream.end(buffer);
   });
 }
 
@@ -737,56 +704,40 @@ app.post('/api/ai/chat', async (req, res) => {
 
   if (!GROQ_API_KEY) {
     return res.json({
-      answer: 'La IA de texto no esta configurada. Falta GROQ_API_KEY en el servidor.'
-    });
-  }
-
-  if (typeof fetch !== 'function') {
-    return res.json({
-      answer: 'El entorno de servidor no soporta fetch, no puedo contactar con Groq.'
+      answer: 'La IA no esta configurada (falta GROQ_API_KEY), pero el chat funciona.'
     });
   }
 
   try {
+    const modeloTexto = GROQ_MODEL ? GROQ_MODEL.trim() : 'llama-3.1-8b-instant';
+
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${GROQ_API_KEY}`
+        Authorization: `Bearer ${GROQ_API_KEY.trim()}`,
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: GROQ_MODEL,
-        messages: [
-          {
-            role: 'system',
-            content: 'Eres un asistente util, breve y claro dentro de una aplicacion de chat.'
-          },
-          {
-            role: 'user',
-            content: message
-          }
-        ],
-        temperature: 0.7
+        model: modeloTexto,
+        messages: [{ role: 'user', content: message }]
       })
     });
 
     const data = await response.json();
-    let answer = 'No he podido generar una respuesta.';
 
     if (!response.ok) {
       console.error('Groq API error:', data);
-      answer = data?.error?.message || 'Groq devolvio un error.';
-    } else if (data?.choices?.[0]?.message?.content) {
-      answer = data.choices[0].message.content.trim();
-    } else {
-      console.error('Groq API respuesta inesperada:', data);
+      return res.json({
+        answer: `Error de IA: ${data.error?.message || 'Error desconocido'}`
+      });
     }
 
+    const answer = data.choices?.[0]?.message?.content?.trim() || 'No he podido generar una respuesta.';
     res.json({ answer });
   } catch (err) {
     console.error('Error en /api/ai/chat', err);
     res.json({
-      answer: 'Ha habido un problema al contactar con la IA de texto.'
+      answer: 'Ha habido un problema de red al contactar con la IA, pero puedes seguir chateando aqui.'
     });
   }
 });
@@ -798,73 +749,47 @@ app.post('/api/ai/image', async (req, res) => {
     return res.status(400).json({ error: 'Descripcion requerida' });
   }
 
-  if (!HUGGING_FACE_API_KEY) {
+  if (!HF_API_TOKEN) {
     return res.json({
       imageUrl: null,
-      error: 'La IA de imagen no esta configurada. Falta HUGGING_FACE_API_KEY en el servidor.'
-    });
-  }
-
-  if (typeof fetch !== 'function') {
-    return res.json({
-      imageUrl: null,
-      error: 'El entorno de servidor no soporta fetch, no puedo generar imagenes.'
+      error: 'La IA de imagenes no esta configurada (falta HF_API_TOKEN).'
     });
   }
 
   try {
-    const response = await fetch(
-      `https://api-inference.huggingface.co/models/${encodeURIComponent(HUGGING_FACE_IMAGE_MODEL)}`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${HUGGING_FACE_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          inputs: prompt,
-          options: {
-            wait_for_model: true
-          }
-        })
-      }
-    );
+    const modeloImagen = HF_IMAGE_MODEL
+      ? HF_IMAGE_MODEL.trim()
+      : 'stabilityai/stable-diffusion-xl-base-1.0';
+    const url = `https://api-inference.huggingface.co/models/${modeloImagen}`;
 
-    const contentType = response.headers.get('content-type') || '';
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${HF_API_TOKEN.trim()}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ inputs: prompt })
+    });
 
     if (!response.ok) {
-      let errorText = 'Hugging Face devolvio un error al generar la imagen.';
-      try {
-        if (contentType.includes('application/json')) {
-          const errorJson = await response.json();
-          errorText = errorJson?.error || JSON.stringify(errorJson);
-        } else {
-          errorText = await response.text();
-        }
-      } catch (error) {
-        errorText = response.statusText || errorText;
-      }
-
-      console.error('Hugging Face image error:', errorText);
-      return res.json({ imageUrl: null, error: errorText });
+      const errText = await response.text();
+      console.error(`Hugging Face error (status ${response.status}):`, errText);
+      return res.json({
+        imageUrl: null,
+        error: 'Hugging Face devolvio un error al generar la imagen. Intenta de nuevo.'
+      });
     }
 
     const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const mimeType = contentType.includes('jpeg') ? 'image/jpeg' : 'image/png';
-    const uploadedImage = await uploadBufferToCloudinary(
-      buffer,
-      'ai-images',
-      'stable-diffusion-xl',
-      mimeType
-    );
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    const imageUrl = `data:image/png;base64,${base64}`;
 
-    res.json({ imageUrl: uploadedImage.secure_url });
+    res.json({ imageUrl });
   } catch (err) {
     console.error('Error en /api/ai/image', err);
     res.json({
       imageUrl: null,
-      error: 'Ha habido un problema al generar la imagen con Hugging Face.'
+      error: 'Ha habido un problema de red al generar la imagen.'
     });
   }
 });
